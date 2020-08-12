@@ -25,7 +25,7 @@ d) analyze the design to get descriptives for the paper
 
 
 ### 2. Annotation runs
-Map barcodes to oligos, count the combos, and map them to the MPRA design. There is one code file for TSS and one for Upstream. For each library, we made three files that will be needed in downstream analyses. Four of these six files are big (TSS library: R_bcCountsAssigned_160629.RData and R_bcCountsTopOligoOnly_160629.RData; Upstream library: R_bcCountsAssigned_UpStream.RData and R_bcCountsTopOligoOnly_161203_UpStream.RData). They are available at https://figshare.com/s/1c23d927e17fc203ac3b.
+Map barcodes to oligos, count the combinations, and map them to the MPRA design. There is one code file for TSS and one for Upstream. For each library, the code produces three files that will be needed in downstream analyses. Four of these six files are big (TSS library: R_bcCountsAssigned_160629.RData and R_bcCountsTopOligoOnly_160629.RData; Upstream library: R_bcCountsAssigned_UpStream.RData and R_bcCountsTopOligoOnly_161203_UpStream.RData). They are available at https://figshare.com/s/1c23d927e17fc203ac3b.
 
 
 ### 3. Test for causal variants and do basic analyses on them
