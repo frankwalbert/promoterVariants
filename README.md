@@ -1,5 +1,5 @@
 # promoterVariants
-### Code, objects and annotations for Cheung, Renganaath, et al, 2020
+### Code, objects and annotations for Cheung, Renganaath, et al., 2020
 
 The code is broken into the five major areas listed below.
 
@@ -25,17 +25,17 @@ d) analyze the design to get descriptives for the paper
 
 
 ### 2. Annotation runs
-Map barcodes to oligos, count the combos, and map them to the MPRA design. There is one code file for TSS and one for Upstream. For each library, we made three files that will be needed in downstream analyses. Four of these six files are big, and available at https://figshare.com/s/1c23d927e17fc203ac3b. See annotationRunOverview_4Repo.xlsx for their names – adjust as needed for local analyses.
+Map barcodes to oligos, count the combos, and map them to the MPRA design. There is one code file for TSS and one for Upstream. For each library, we made three files that will be needed in downstream analyses. Four of these six files are big (TSS library: R_bcCountsAssigned_160629.RData and R_bcCountsTopOligoOnly_160629.RData; Upstream library: R_bcCountsAssigned_UpStream.RData and R_bcCountsTopOligoOnly_161203_UpStream.RData). They are available at https://figshare.com/s/1c23d927e17fc203ac3b.
 
 
 ### 3. Test for causal variants and do basic analyses on them
-"01_countAndcombineAllSamples": does just that. For every replicate sample, count the barcodes, aggregate them into a big table. This gets very heavy in terms of RAM and runtime – treat carefully. The key outputs of this are provided at https://figshare.com/s/1c23d927e17fc203ac3b; mainly "R_countsMappedToDesignedOligos_180616"
+"01_countAndcombineAllSamples": does just that. For every replicate sample, count the barcodes, aggregate them into a big table. This uses a lot of RAM and runs for hours. The key output of this is "R_countsMappedToDesignedOligos_180616.RData", which is available at https://figshare.com/s/1c23d927e17fc203ac3b.
 
-The three files starting "0x_mpralm..." contain the statistical analyses of single variants and epistasis, as well as plots.
+The three files starting "0x_mpralm..." contain the statistical analyses of single variants and epistasis.
 
 "06_aggregateVariantResults.R" combines the results across the TSS and Upstream library, does reproducibility of single variants, and makes the big volcano plot.
 
-"07_variantsPerGene_and_eQTLs.R" compares the single variant effects to local eQTLs
+"07_variantsPerGene_and_eQTLs.R" compares the single variant effects to local eQTLs.
 
 
 ### 4. variant annotation
