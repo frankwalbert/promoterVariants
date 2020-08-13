@@ -4,7 +4,7 @@
 The code is divided into the six major areas listed below.
 
 Code in areas 1 to 3 and some of area 4 written by Frank Albert.
-Code in area 5 and remainder in area 4 written by Kaushik Renganaath.
+Code in area 5 and the rest of area 4 written by Kaushik Renganaath.
 Code in area 6 from https://www.nature.com/articles/s41587-019-0315-8 with minor modifications by Kaushik Renganaath.
 
 Each area has one code folder. Areas 1 – 4 also have folders with various objects, annotations, etc, that get used by the code. In some cases, objects get used by several analysis areas (such as the oligo design file, gene annotations, barcode counts). Be sure to look through all object folders and adjust your paths as necessary. Some of the annotation files are gzipped – need to unzip before use with the R code.
