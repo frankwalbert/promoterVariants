@@ -1,7 +1,7 @@
 # promoterVariants
 ### Code, objects and annotations for Cheung, Renganaath, et al., 2020
 
-The code is broken into the five major areas listed below.
+The code is broken into the six major areas listed below.
 
 All code written by Frank Albert, except for code in area 5 and TFBS annotation code in area 4, which was written by Kaushik Renganaath.
 
@@ -44,3 +44,8 @@ Make and gather various features. While all code needed to recapitulate how thes
 
 ### 5. feature analyses & prediction
 Single features and the various multiple regression models
+
+### 6. Application of the deBoer 2020 model to our data
+The model is described here: https://www.nature.com/articles/s41587-019-0315-8
+
+All required code and data are in a dedicated folder. We made minor modifications to the code from the paper above.
