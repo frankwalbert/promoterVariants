@@ -3,9 +3,11 @@
 
 The code is broken into the six major areas listed below.
 
-All code written by Frank Albert, except for code in area 5 and TFBS annotation code in area 4, which was written by Kaushik Renganaath.
+Code in areas 1 to 3 and some of area 4 written by Frank Albert.
+Code in area 5 and remainder in area 4 written by Kaushik Renganaath.
+Code in area 6 by Kaushik Renganaath, building on code from https://www.nature.com/articles/s41587-019-0315-8
 
-For each area, there is one folder with code, and one folder with various objects, annotations, etc, that get used by the code. In some cases, objects get used by several analysis areas (such as the oligo design file, gene annotations, barcode counts). Be sure to look through all object folders and adjust your paths as necessary. Some of the annotation files are gzipped – need to unzip before use with the R code.
+Each area has one folder with code. Areas 1 – 4 also have folders with various objects, annotations, etc, that get used by the code. In some cases, objects get used by several analysis areas (such as the oligo design file, gene annotations, barcode counts). Be sure to look through all object folders and adjust your paths as necessary. Some of the annotation files are gzipped – need to unzip before use with the R code.
 
 Throughout, the code files are numbered in the order in which they should be used. Sometimes a later file won't work if it is run before an earlier file because it needs intermediate objects saved by some of the earlier files. We provided the most important of these intermediate objects, but some minor files may need to be created using the code here. Some huge files are also missing from this code repository (e.g. barcode level counts, not just those to designed oligos). These are available at the GEO repository listed in the paper or at https://figshare.com/s/1c23d927e17fc203ac3b
 
@@ -48,4 +50,4 @@ Single features and the various multiple regression models
 ### 6. Application of the deBoer 2020 model to our data
 The model is described here: https://www.nature.com/articles/s41587-019-0315-8
 
-All required code and data are in a dedicated folder. We made minor modifications to the code from the paper above.
+For this area, all required code and data are in a dedicated folder. We made minor modifications to the code from the paper above.
