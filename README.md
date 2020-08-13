@@ -1,7 +1,7 @@
 # promoterVariants
 ### Code, objects and annotations for Cheung, Renganaath, et al., 2020
 
-The code is broken into the six major areas listed below.
+The code is divided into the six major areas listed below.
 
 Code in areas 1 to 3 and some of area 4 written by Frank Albert.
 Code in area 5 and remainder in area 4 written by Kaushik Renganaath.
