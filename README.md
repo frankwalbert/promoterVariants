@@ -50,4 +50,4 @@ Single features and the various multiple regression models
 ### 6. Application of the deBoer 2020 model to our data
 The model is described here: https://www.nature.com/articles/s41587-019-0315-8
 
-For this area, all required code and data are in a dedicated folder. We made minor modifications to the code from the paper above.
+For this area, all required code and data are in a zipped folder structure. The code is almost entirely from de Boer et al., 2020. We made minor modifications.
