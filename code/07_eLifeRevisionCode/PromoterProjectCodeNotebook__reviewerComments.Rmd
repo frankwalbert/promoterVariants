@@ -1,0 +1,516 @@
+---
+title: "Promoter Paper: Analyses for reviewer replies"
+output: html_notebook
+---
+
+#Oversampling of minority class in logistic regression models building (Reviewer III Major Comment 2)
+```{r}
+
+library(caret)
+library(pROC)
+library(dplyr)
+library(ggpubr)
+library(Metrics)
+library(reshape2)
+  
+  #load formule and datasets required for running your logistic regression training. 
+dir = "~/Desktop/3UTR/"
+
+load(paste0(dir, "data/formulaeForModelBuilding_new.rda")) #formulae for logit regressions
+load(paste0(dir, "data/allVarsData_popFrequencyReduced.rda")) 
+
+#training-test split
+
+set.seed(7988)
+trainingRows_logit =  createDataPartition(allData_popFreqReduced$causalVariant, list = FALSE, p = 0.9)
+
+trainingSet_logit = allData_popFreqReduced[trainingRows_logit,]
+testSet_logit = allData_popFreqReduced[-trainingRows_logit,]
+
+### oversampling the minority class in training set ------
+  #trainingSet - split causal and non-causal
+causal_training = filter(trainingSet_logit, causalVariant == TRUE)
+nonCausal_training = filter(trainingSet_logit, causalVariant == FALSE)
+
+set.seed(456) #to ensure the sample() output is reproducible
+causal_training_up = causal_training[sample(nrow(causal_training), nrow(nonCausal_training), replace = TRUE),]
+
+trainingSet_logit_up = rbind(causal_training_up, nonCausal_training) #new training set with oversampled minority class
+
+##model training
+set.seed(123)
+trControl_logit = trainControl(
+    method = "repeatedcv",
+    number=10,
+    repeats = 5)
+  
+trainLogitCVs_up = function(x,name){
+  
+  print(name)
+  
+  model_logit = train(causalVariant~., 
+                   data = dplyr:: select(trainingSet_logit_up, x, causalVariant),
+                   method = "glm",
+                   family = binomial(),
+                   metric = "Kappa",
+                   trControl = trControl_logit,
+                   na.action = na.exclude)
+  
+  kappa_all = model_logit$resample$Kappa 
+  
+  prediction_logitModel = predict(model_logit, newdata = select(testSet_logit, x), type = "prob")
+  preds = prediction_logitModel$`TRUE`
+  preds = factor(preds, ordered = TRUE)
+  plottingROC = data.frame(causalVariant = testSet_logit$causalVariant, preds = preds)
+  auc = roc(plottingROC$causalVariant~plottingROC$preds)$auc
+  return(c(kappa_all,auc, list(prediction_logitModel$`TRUE`)))}
+
+logitModels_up = parallel::mcmapply(FUN = trainLogitCVs_up, allXArguments_logit, names(allXArguments_logit), mc.cores = parallel::detectCores())
+
+###### plotting the best logistic regression model after upscaling minority class ########
+logitModels_up = as.data.frame(t(as.data.frame(logitModels_up)))
+colnames(logitModels_up) = c(paste0("Kappa", seq(1:50)), "AUC", "preds")
+
+models= stringr::str_remove_all(row.names(logitModels_up), "formula_")
+logitModels_up$model = models
+
+logitModels_trainingKappa_up = select(logitModels_up, contains("Kappa"), model)
+logitModels_trainingKappa_up[,1:50] = as.data.frame(apply(logitModels_trainingKappa_up[,1:50],2,FUN = as.numeric))
+logitModels_trainingKappa_up$meanKappa = apply(logitModels_trainingKappa_up[,1:50],1, mean)
+
+testPreds_logitModels_up = select(logitModels_up, AUC, preds, model)
+testPreds_logitModels_up$AUC = as.numeric(testPreds_logitModels_up$AUC)
+testPreds_logitModels_up$meanKappa = logitModels_trainingKappa_up$meanKappa
+
+bestAUC = which(testPreds_logitModels_up$AUC == max(testPreds_logitModels_up$AUC))
+bestModelName = testPreds_logitModels_up$model[bestAUC]
+preds_best= unlist(testPreds_logitModels_up$preds[bestAUC])
+preds_best = factor(preds_best, ordered = TRUE)
+
+plottingROC = data.frame(causalVariant = testSet_logit$causalVariant, preds = preds_best)
+
+pdf(paste0(dir, "results/bestClassifier_AUCCurve_oversamplingMinorityClass.pdf"))
+roc_curve = smooth(roc(plottingROC$causalVariant~plottingROC$preds, plot = TRUE, print.auc = TRUE))
+dev.off()
+
+### compare the oversampling vs no oversampling ----
+  # get the data for no oversampling first using the chunk in the main code
+  # here I directly source the object from my folders. For github users - run the corresponding chunk in main code.
+load(paste0(dir,"resultsOfPromoterAnalyses/DataReworked_DerivedAncestralFeaturesAdded_200719/linearAndLogitModels_200723.rda")) #load R object of logit model results without oversampling 
+
+logitModels = as.data.frame(t(as.data.frame(logitModels)))
+colnames(logitModels) = c(paste0("Kappa", seq(1:50)), "AUC", "preds")
+
+models= stringr::str_remove_all(row.names(logitModels), "formula_")
+logitModels$model = models
+
+logitModels_trainingKappa = select(logitModels, contains("Kappa"), model)
+logitModels_trainingKappa[,1:50] = as.data.frame(apply(logitModels_trainingKappa[,1:50],2,FUN = as.numeric))
+logitModels_trainingKappa$meanKappa = apply(logitModels_trainingKappa[,1:50],1, mean)
+
+testPreds_logitModels = select(logitModels, AUC, preds, model)
+testPreds_logitModels$AUC = as.numeric(testPreds_logitModels$AUC)
+testPreds_logitModels$meanKappa = logitModels_trainingKappa$meanKappa
+
+  # compare with and without oversampling
+
+for(i in 1:nrow(testPreds_logitModels)){
+  model = testPreds_logitModels$model[i]
+  rowInUp = which(testPreds_logitModels_up$model == model)
+  testPreds_logitModels[i, c("AUC_up", "meanKappa_up")] =testPreds_logitModels_up[rowInUp, c("AUC", "meanKappa")]
+}
+
+
+pdf(paste0(dir, "results/AUCComparison_oversamplingMinorityClassVsNoOversampling.pdf"))
+ggscatter(testPreds_logitModels,
+          x = "AUC",
+          y = "AUC_up",
+          title = "AUC on test set",
+          xlab = "AUC without oversampling minority class",
+          ylab = "AUC with oversampling minority class"
+          ) + stat_cor(method = "spearman") + geom_abline(slope = 1, intercept=0, color = "red") + ylim(0.45, 0.75) + xlim(0.45, 0.75)
+
+ggscatter(testPreds_logitModels,
+          x = "meanKappa",
+          y = "meanKappa_up",
+          title = "mean Kappa across 50-folds (10 fold repeated CV)",
+          xlab = "mean-Kappa without oversampling minority class",
+          ylab = "mean-Kappa with oversampling minority class"
+          ) + stat_cor(method = "spearman") + geom_abline(slope = 1, intercept=0, color = "red") 
+dev.off()
+
+
+```
+
+
+#adding conserved TFBS (Reviewer III Minor comment 2)
+  #data for conserved TFBS is loaded from http://fraenkel-nsf.csbi.mit.edu/improved_map/latest_maps.html (binding p-value = 0.001; conservation cutoff - stringent)
+  
+```{r}
+library(GenomicRanges)
+library(stringr)
+library(ggpubr)
+library(forcats)
+library(qvalue)
+library(readr)
+library(dplyr)
+
+dir = "~/Desktop/3UTR/"
+
+conservedTFBS  = read_delim(paste0(dir, "data/conservedTFBS.txt"), 
+                            "\t", escape_double = FALSE, col_names = FALSE, 
+                            col_types = cols(X6 = col_skip(), X2 = col_skip(), X3 = col_skip(), X8 = col_skip()),
+                            trim_ws = TRUE)
+colnames(conservedTFBS) = c("chr","start", "end", "strand", "TF")
+conservedTFBS$chr = paste0("chr", conservedTFBS$chr)
+
+conservedTFBS_genomeRanges = GRanges(seqnames = conservedTFBS$chr, 
+                                     ranges = IRanges(start=conservedTFBS$start, 
+                                                        end=conservedTFBS$end), 
+                                     strand = conservedTFBS$strand,
+                                     TF = conservedTFBS$TF)
+
+
+  load(paste0(dir, "R_resultsAndAnnotations_200719.RData")) 
+
+  load(paste0(dir, "data/AllVarsData_6kVars_WeakAndStrongBindingComputedSeparately.rda"))
+
+variantsDF = data.frame(t(sapply(resultsAndAnnotations$variantID, function(x){strsplit(x, "_")[[1]]})), stringsAsFactors=FALSE)
+colnames(variantsDF) = c("chr", "pos", "ref", "alt", "strand")
+variantsDF$SNP = nchar(variantsDF[,3]) == 1 & nchar(variantsDF[,4]) == 1
+# in cases with commas in the alt allele, we only made the first
+variantsDF$alt[str_detect(variantsDF$alt, ",")] = sapply(variantsDF$alt[str_detect(variantsDF$alt, ",")], function(x){str_split(x, ",")[[1]][1]})
+variantsGRanges = GRanges(seqnames = variantsDF$chr, ranges = IRanges(start=as.numeric(variantsDF$pos), end=as.numeric(variantsDF$pos) + nchar(variantsDF$ref) - 1), strand = variantsDF$strand, ref=variantsDF$ref, alt=variantsDF$alt)
+
+overlaps = countOverlaps(query = variantsGRanges, subject = conservedTFBS_genomeRanges,
+                        ignore.strand = TRUE)
+resultsAndAnnotations$numberOverlapsInConservedTFBS = overlaps
+
+#add inAConservedTFBS to allData_all and allData_4kVars object
+allData_all_std$inAConservedTFBS = (overlaps != 0) #dont have to restandardize because inAConservedTFBS is a categorical variable
+allData_4kVars_std = allData_all_std[!(is.na(allData_all_std$causalVariant)),]
+
+# recompute the logistic regression estimates using the chunk of code from the main notebook
+computeLogReg = function(allData){
+sink(paste0(dir, "resultsOfPromoterAnalyses/DataReworked_DerivedAncestralFeaturesAdded_200719/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new_withConservedTFBS.csv")) #print the files to an output file
+  # sink(paste0(dir, "resultsOfPromoterAnalyses/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_YeastFasCo.csv")) #print the files to an output file
+
+cat(paste("FEATURE", 
+          "Estimate_FeatureOnly",
+          "pValue_FeatureOnly", 
+          "StdError_FeatureOnly",
+          "SignificanceForFeatureOnly", 
+          "Estimate_FeatureAndLibrary",
+          "pValue_FeatureAndLibrary", 
+          "StdError_FeatureAndLibrary",
+          "SignificanceForFeatureAndLibrary",
+          "ANOVA_FeatureAndLibraryVsLibrary",
+          "SignificanceOnANOVA_FeatureAndLibraryVsLibrary",
+          "Estimate_FeatureAndAveExpr",
+          "pValue_FeatureAndAveExpr", 
+          "StdError_FeatureAndAveExpr",
+          "SignificanceForFeatureAndAveExpr",
+          "ANOVA_FeatureAndAveExprVsAveExpr",
+          "SignificanceOnANOVA_FeatureAndAveExprVsAveExpr",
+          "Estimate_FeatureAndAveExprAndLibrary",
+          "pValue_FeatureAndAveExprAndLibrary", 
+          "StdError_FeatureAndAveExprAndLibrary",
+          "SignificanceForFeatureAndAveExprAndLibrary",
+          "ANOVA_FeatureAndAveExprAndLibraryVsAveExprAndLibrary",
+          "SignificanceOnANOVA_FeatureAndAveExprAndLibraryVsAveExprAndLibrary",
+          sep = ","), sep = "\n")
+
+for(i in 1:(ncol(allData))){
+  feature = colnames(allData)[i]
+  if(feature != "library"){
+    
+    #featureOnly: causalVariant~feature ------
+      formula_featureOnly = paste0("causalVariant~`", feature, "`") #formula
+      logitModel_featureOnly = glm(as.formula(formula_featureOnly), data = allData, family = binomial) #model 
+      summary_logitModel_featureOnly= summary(logitModel_featureOnly) #model summary
+    
+        #extract summary statistics - pVal, estimate, stdError 
+        FeatureOnly_rowIndex = which(grepl(feature, rownames(summary_logitModel_featureOnly$coefficients)) & !(grepl("library", rownames(summary_logitModel_featureOnly$coefficients))))
+        
+        pValueForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA, 
+                                      summary_logitModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Pr(>|z|)"])
+        
+        estimateForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA,
+                                              summary_logitModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Estimate"])
+        
+        stdErrorForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA,
+                                        summary_logitModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Std. Error"])
+    
+    #featureOnly: causalVariant~library + feature ------
+        formula_featureAndLibrary = paste0("causalVariant~library+`", feature, "`")
+        logitModel_featureAndLibrary = glm(as.formula(formula_featureAndLibrary), data = allData, family = binomial)
+        summary_logitModel_featureAndLibtary = summary(logitModel_featureAndLibrary)
+        
+        #get summary statistics - pVal, estimate and stdError
+       FeatureAndLibrary_rowIndex = which(grepl(feature, rownames(summary_logitModel_featureAndLibtary$coefficients)) & !(grepl("library", rownames(summary_logitModel_featureAndLibtary$coefficients))))
+        
+        pValueForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA, 
+                                      summary_logitModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Pr(>|z|)"])
+        
+        estimateForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA,
+                                              summary_logitModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Estimate"])
+        stdErrorForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA,
+                                              summary_logitModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Std. Error"])
+
+        #featureOnly: causalVariant~AveExpr + feature ------
+        formula_featureAndAveExpr = paste0("causalVariant~AveExpr+`", feature, "`")
+        logitModel_featureAndAveExpr = glm(as.formula(formula_featureAndAveExpr), data = allData, family = binomial)
+        summary_logitModel_featureAndAveExpr = summary(logitModel_featureAndAveExpr)
+        
+        #get summary statistics - pVal, estimate and stdError
+        FeatureAndAveExpr_rowIndex = which(grepl(feature, rownames(summary_logitModel_featureAndAveExpr$coefficients)) & !(grepl("library", rownames(summary_logitModel_featureAndAveExpr$coefficients))))
+        
+        pValueForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA, 
+                                            summary_logitModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Pr(>|z|)"])
+        
+        estimateForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA,
+                                              summary_logitModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Estimate"])
+        stdErrorForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA,
+                                              summary_logitModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Std. Error"])
+        
+        #featureOnly: causalVariant~library + AveExpr + feature ------
+        formula_featureAndLibraryAndAveExpr = paste0("causalVariant~library + AveExpr+ `", feature, "`")
+        logitModel_featureAndLibraryAndAveExpr = glm(as.formula(formula_featureAndLibraryAndAveExpr), data = allData, family = binomial)
+        summary_logitModel_featureAndLibraryAndAveExpr = summary(logitModel_featureAndLibraryAndAveExpr)
+        
+        #get summary statistics - pVal, estimate and stdError
+        featureAndLibraryAndAveExpr_rowIndex = which(grepl(feature, rownames(summary_logitModel_featureAndLibraryAndAveExpr$coefficients)) & !(grepl("library", rownames(summary_logitModel_featureAndLibraryAndAveExpr$coefficients))))
+        
+        pValueForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA, 
+                                            summary_logitModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Pr(>|z|)"])
+        
+        estimateForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA,
+                                              summary_logitModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Estimate"])
+        stdErrorForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA,
+                                              summary_logitModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Std. Error"])
+        
+    #libraryOnlyModel 
+    baseModel = glm(causalVariant~library, data = logitModel_featureAndLibrary$model, family = binomial) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    #AveExprModel
+    baseModelWithAveExpr = glm(causalVariant~AveExpr, data = logitModel_featureAndAveExpr$model, family = binomial) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    #library and AveExprModel
+    baseModelWithLibraryAndAveExpr = glm(causalVariant~library + AveExpr, data = logitModel_featureAndLibraryAndAveExpr$model, family = binomial) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    
+    #anova test comparing model: causalVariant~ library + feature to model: causalVariant~library to check if the features influence on the dependent variable is an artifact of the library or legit.
+    
+    ANOVA = anova(baseModel, logitModel_featureAndLibrary, test = "Chisq")
+    ANOVA_pValue = ANOVA$`Pr(>Chi)`[2]
+    
+    ANOVA_AveExpr = anova(baseModelWithAveExpr, logitModel_featureAndAveExpr, test = "Chisq")
+    ANOVA_AveExpr_pValue = ANOVA_AveExpr$`Pr(>Chi)`[2]
+    
+    ANOVA_LibraryAndAveExpr = anova(baseModelWithLibraryAndAveExpr, logitModel_featureAndLibraryAndAveExpr, test = "Chisq")
+    ANOVA_LibraryAndAveExpr_pValue = ANOVA_LibraryAndAveExpr$`Pr(>Chi)`[2]
+    
+    #output
+    cat(paste(feature,
+              estimateForFeatureOnly,
+              pValueForFeatureOnly,
+              stdErrorForFeatureOnly,
+              ifelse(pValueForFeatureOnly < 0.05, "significant", "notSignificant"),
+              estimateForFeatureAndLibrary,
+              pValueForFeatureAndLibrary,
+              stdErrorForFeatureAndLibrary,
+              ifelse(pValueForFeatureAndLibrary < 0.05, "significant", "notSignificant"),
+              ANOVA_pValue,
+              ifelse(ANOVA_pValue < 0.05, "significant", "notSignificant"),
+              estimateForFeatureAndAveExpr,
+              pValueForFeatureAndAveExpr,
+              stdErrorForFeatureAndAveExpr,
+              ifelse(pValueForFeatureAndAveExpr < 0.05, "significant", "notSignificant"),
+              ANOVA_AveExpr_pValue,
+              ifelse(ANOVA_AveExpr_pValue < 0.05, "significant", "notSignificant"),
+              estimateForfeatureAndLibraryAndAveExpr,
+              pValueForfeatureAndLibraryAndAveExpr,
+              stdErrorForfeatureAndLibraryAndAveExpr,
+              ifelse(pValueForfeatureAndLibraryAndAveExpr < 0.05, "significant", "notSignificant"),
+              ANOVA_LibraryAndAveExpr_pValue,
+              ifelse(ANOVA_LibraryAndAveExpr_pValue < 0.05, "significant", "notSignificant"),
+              sep = ","), sep = "\n")
+  }
+  
+}
+
+closeAllConnections()
+
+}
+  computeLogReg(allData_4kVars_std)
+  
+# plot only the non-TF feature estimates
+ allLogNet = read_csv(paste0(dir,"results/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"))
+
+  allLogNet$adj.P.val_FeatureAndAveExprAndLibrary = qvalue(allLogNet$pValue_FeatureAndAveExprAndLibrary)$qvalues
+
+  plotLogNet_new = function(allLogNet, moniker){
+  StrandAgnosticRows = grep(allLogNet$FEATURE, pattern = "Agnostic")
+  
+  allLogNet_plotting = allLogNet[-c(1,2,StrandAgnosticRows),]
+  
+  plottingData = as.data.frame(allLogNet_plotting$FEATURE)
+  colnames(plottingData) = "feature"
+  
+  plottingData$estimate = allLogNet_plotting$Estimate_FeatureAndAveExprAndLibrary
+  plottingData$error = allLogNet_plotting$StdError_FeatureAndAveExprAndLibrary
+  plottingData$adj.pValue = allLogNet_plotting$adj.P.val_FeatureAndAveExprAndLibrary
+  plottingData$significance = ifelse(plottingData$adj.pValue<0.05, "significant", "NS")
+  plottingData$pValue = allLogNet_plotting$pValue_FeatureAndAveExprAndLibrary
+  
+  plottingData$sigLabel = ""
+  plottingData$sigLabel[plottingData$pValue < 0.05] = "*"
+  plottingData$sigLabel[plottingData$adj.pValue < 0.05] = "***"
+  
+  plottingData$labelCoordinates = ifelse(plottingData$estimate < 0, 
+                                         plottingData$estimate - plottingData$error - 0.05,
+                                         plottingData$estimate + plottingData$error + 0.05)
+  
+  plottingData$feature = as.character(plottingData$feature)
+  
+  
+  #differentFeatureTypes
+  variantConservation = which(plottingData$feature %in% c("phastConScore", "MAF", "DAF", "RMDerived", "inAConservedTFBS"))
+  physicalDistanceInGenome = which(plottingData$feature == "distFromGene")
+  alleleSequenceDescriptors = which(plottingData$feature %in% c("SNP", "numberVarsInOligo", "varPosInOligo", "inANucleosome",
+                                                                "delta_BP", "delta_A", "delta_T", "delta_C", "delta_G","delta_TATA", "delta_ATG",
+                                                                "GCFoldChange", "GCContentOfOligo"))
+  geneLevelDescriptors = which(plottingData$feature %in% c("numberOfGenes", "geneConflict", "essential", 
+                                                           "isTF", "hasHumanHomolog","hasParalog","expression", 
+                                                           "dNdS", "dNdS_adjust", "PPI", 
+                                                           "GxGLenient", "GxGStrict", "GxGIntermediate", "nucleosomeScore"))
+  expressionOfOligoRelated = which(plottingData$feature == "AveExpr")
+  
+  TFDifferenceOfMaxWithoutCutOff = which(grepl(plottingData$feature, pattern = "withoutCutOff") 
+                                         & grepl(plottingData$feature, pattern = "differenceOfMax"))
+  TFDifferenceOfMeansWithoutCutOff = which(grepl(plottingData$feature, pattern = "withoutCutOff") 
+                                           & grepl(plottingData$feature, pattern = "differenceOfMeans"))
+  TFDifferenceOfMaxWithCutOff = which(grepl(plottingData$feature, pattern = "withCutOff") 
+                                      & grepl(plottingData$feature, pattern = "differenceOfMax"))
+  TFDifferenceOfMeansWithCutOff = which(grepl(plottingData$feature, pattern = "withCutOff") 
+                                        & grepl(plottingData$feature, pattern = "differenceOfMeans"))
+  TFDeltaSignificantBS = c(which(grepl(plottingData$feature, pattern = "withCutOff") 
+                                 & grepl(plottingData$feature, pattern = "deltaSignificantBindingSites")),
+                           grep(plottingData$feature, pattern = "ChangeInNumberOfTFBS"))
+  
+  plottingData$featureType = ""
+  
+  plottingData$featureType[variantConservation] = "variantConservation"
+  plottingData$featureType[physicalDistanceInGenome] = "physicalDistanceInGenome"
+  plottingData$featureType[alleleSequenceDescriptors] = "sequenceDescriptors"
+  plottingData$featureType[geneLevelDescriptors] = "parentGeneDescriptors"
+  plottingData$featureType[expressionOfOligoRelated] = "expressionOfOligo"
+  #plottingData$featureType[TFDifferenceOfMaxWithoutCutOff] = "differenceOfMaxPWMScore_StrongAndWeakBindingConsidered"
+  #plottingData$featureType[TFDifferenceOfMeansWithoutCutOff] = "differenceOfMeanPWMScore_StrongAndWeakBindingConsidered"
+  plottingData$featureType[TFDifferenceOfMaxWithoutCutOff] = "differenceOfMaxPWMScore_WeakBindingOnly"
+  plottingData$featureType[TFDifferenceOfMeansWithoutCutOff] = "differenceOfMeanPWMScore_WeakBindingOnly"
+  plottingData$featureType[TFDifferenceOfMaxWithCutOff] = "differenceOfMaxPWMScore_StrongBindingOnly"
+  plottingData$featureType[TFDifferenceOfMeansWithCutOff] = "differenceOfMeanPWMScore_StrongBindingOnly"
+  plottingData$featureType[TFDeltaSignificantBS] = "changeInNumberOfStrongTFBS"
+  
+  minusRows = grep(plottingData$feature, pattern = "Minus")
+  plusRows = grep(plottingData$feature, pattern = "Plus")
+  
+  plottingData$strand = NA
+  
+  plottingData$strand[minusRows] = "Minus"
+  plottingData$strand[plusRows] = "Plus"
+  
+  #this is to remove all the extra names and just keep the TF name
+  featureNames = as.data.frame(unlist(str_split(plottingData$feature[-c(1:33)], "_")))
+  rows = which(as.character(featureNames[,1]) %in% c("Minus", "Plus", "withCutOff", "withoutCutOff", "differenceOfMax", "differenceOfMeans", "deltaSignificantBindingSites"))
+  featureText = featureNames[-rows,1]
+  featureText = as.character(featureNames[-rows,1])
+  plottingData$feature[-c(1:33)] = featureText
+  
+  #set a color palette for consistent colors of feature types across different graphs
+  
+  
+  #Bar plot for non-TF Features
+  pdf(paste0(dir,"results/",moniker,"_barPlot_NonTFBindingMetrics_standardized_withInAConservedTFBS.pdf"), width = 10)
+  
+  
+  plot = ggbarplot(plottingData[c(1:33, which(plottingData$feature == "inAConservedTFBS")),],
+                   x = "feature",
+                   y = "estimate",
+                   fill = "featureType",
+                   #color = "featureType",
+                   #alpha = "significance",
+                   title = "Pairwise Regression Estimates - TF binding unrelated descriptors",
+                   remove = c("AveExpr", "library", "RMDerived", "geneConflict"),
+                   sort.val = "desc",
+                   sort.by.groups = FALSE)+ geom_errorbar(aes(ymin = estimate-error, ymax = estimate+error), width = 0.2) +
+    guides(fill = guide_legend(nrow=2), alpha = guide_legend(nrow = 2),
+           color = guide_legend(nrow =2)) + 
+    geom_text(mapping = aes(x = feature, y = labelCoordinates, label = sigLabel), fontface = "bold",angle = 90, color = "#00BFC4", size = 6, vjust = 0.8, hjust = -0.01) + theme_bw() + theme(legend.position = "top") + myPalette +
+    theme(axis.text.x = element_text(angle = 90))#+ coord_flip() 
+  
+  print(plot)
+  dev.off()
+  
+  }
+  plotLogNet_new(allLogNet, moniker = "pairwiseLogRegs_WeakAndStrongBindingComputedSeparately")
+  
+```
+
+#accounting for correlated features using elastic net regularization to find true number of independent features (Reviewer II Major Comment 1)
+
+```{r}
+library(caret)
+library(dplyr)
+library(pROC)
+  
+  #load formule and datasets required for running your logistic regression training. 
+dir = "~/Desktop/3UTR/"
+
+load(paste0(dir, "data/formulaeForModelBuilding_new.rda")) #formulae for logit regressions
+load(paste0(dir, "data/allVarsData_popFrequencyReduced.rda")) 
+
+set.seed(7988)
+trainingRows_logit =  createDataPartition(allData_popFreqReduced_std$causalVariant, list = FALSE, p = 0.9)
+
+trainingSet_logit = allData_popFreqReduced[trainingRows_logit,]
+testSet_logit = allData_popFreqReduced[-trainingRows_logit,]
+
+
+set.seed(123)
+trControl_logit = trainControl(
+  method = "repeatedcv",
+  number=10,
+  repeats = 5)
+
+myTuneGrid <- expand.grid(alpha = c(0,0.5,1), lambda = c(0,0.5,1))
+
+featureSet = c(allXArguments_logit$formula_metaTFVars_all, allXArguments_logit$formula_NonTFVars_TFVars_all)
+
+hit_elnet_classifier = train(causalVariant~., 
+                             data = dplyr:: select(trainingSet_logit, featureSet, causalVariant),
+                             method = "glmnet",
+                             family = "binomial",
+                             metric = "Kappa",
+                             trControl = trControl_logit,
+                             na.action = na.exclude,
+                             tuneGrid = myTuneGrid )
+
+
+# load the model object from MSI
+
+kappa_all = hit_elnet_classifier$resample$Kappa 
+
+prediction_logitModel = predict(hit_elnet_classifier, newdata = select(testSet_logit, featureSet), type = "prob")
+preds = prediction_logitModel$`TRUE`
+preds = factor(preds, ordered = TRUE)
+plottingROC = data.frame(causalVariant = testSet_logit$causalVariant, preds = preds)
+auc = pROC::roc(plottingROC$causalVariant~plottingROC$preds)$auc
+auc
+
+varImportance = varImp(hit_elnet_classifier, scale = FALSE)$importance
+varImportance$feature = row.names(varImportance)
+nonZeroVarImportance = filter(varImportance, Overall !=0)
+```
+

@@ -1,0 +1,2488 @@
+---
+title: "Promoter Project codes"
+author: "Kaushik Renganaath"
+output:
+  html_document:
+    df_print: paged
+editor_options: 
+  chunk_output_type: console
+---
+
+This chunk will 
+1) reformat the datasets according to the smaller subset of variants generated on 23rd March 2020
+2) Compute the absolute values of all features to remove reference bias
+3) compute meta features for each TF feature type (one of which has already been computed - changeInNumberOfTFBS which will just be renamed)
+4) define causalVariant class for use in logRegs
+5) combine non-TF vars and TF vars into one giant dataset
+6) standardize the data to make all features unit-less (Note:we wont standardize logFC because it is a dependent variable)
+7) define data for logRegs (4k+ vars)
+8) save the data
+
+```{r}
+
+  library(dplyr)
+  library(caret)
+
+  dir = "~/Desktop/3UTR/" # set directory to folder downloaded from Github
+
+  #load newly formatted data -------
+  load(paste0(dir, "phastConsGCContentGCFoldChange_200501.rda"))
+  
+  load(paste0(dir, "R_resultsAndAnnotations_200719.RData"))
+  
+  #load old data to be reformatted -----
+  
+  load(paste0(dir, "PromoterDataWithNewTFScores_MinusStrand_ScerTF.RData"))
+  load(paste0(dir, "PromoterDataWithNewTFScores_PlusStrand_ScerTF.RData"))
+  load(paste0(dir, "PromoterDataWithNewTFScores_StrandAgnostic_ScerTF.RData"))
+  
+  #load(paste0(dir, "data/PromoterDataWithYeastFasCoTFs.RData"))
+  
+
+  #subset for only variants in old which are present in new data ----
+  
+  #variantsThatStayed = which(resultsAndAnnotations$variantID %in% otherInfo$variantID )
+  
+  #reworkData = function(x){return(x[variantsThatStayed,])}
+  
+  otherInfo = cbind(otherInfo[,1:44],phastConsGCContentGCFoldChange[,-1])
+  
+  otherInfo$MAF = 0
+  otherInfo$DAF = 0
+  otherInfo$RMDerived = NA
+  
+  for(row in 1:nrow(otherInfo)){
+    variantID = otherInfo$variantID[row]
+    rowInNewData = which(resultsAndAnnotations$variantID == variantID)
+    otherInfo[row, c("MAF", "DAF", "RMDerived")] = resultsAndAnnotations[rowInNewData, c("MAF", "DAF", "RMDerived")]
+  }
+  
+  #variantData_WithCutOff_minus = reworkData(variantData_WithCutOff_minus)
+  #variantData_WithoutCutOff_minus = reworkData(variantData_WithoutCutOff_minus)
+  
+  #variantData_WithCutOff_plus = reworkData(variantData_WithCutOff)
+  #variantData_WithoutCutOff_plus = reworkData(variantData_WithoutCutOff)
+  
+  #variantData_WithCutOff_agnostic = reworkData(variantData_WithCutOff_agnostic)
+  #variantData_WithoutCutOff_agnostic = reworkData(variantData_WithoutCutOff_agnostic)
+  
+  #variantData_WithoutCutOff_YeastFasCo_plus = reworkData(variantData_WithoutCutOff_YeastFasCo)
+  
+  
+  #compute Absolute Value Of TF Features -------
+   computeAbs = function(dataset){
+    return(apply(dataset, 2, abs))
+  }
+  
+  variantData_WithCutOff_minus[,-1] = computeAbs(variantData_WithCutOff_minus[,-1])
+   variantData_WithoutCutOff_minus[,-1] = computeAbs(variantData_WithoutCutOff_minus[,-1])
+    
+  variantData_WithCutOff_plus[,-1] = computeAbs(variantData_WithCutOff_plus[,-1])
+   variantData_WithoutCutOff_plus[,-1] = computeAbs(variantData_WithoutCutOff_plus[,-1])
+   
+  variantData_WithCutOff_agnostic[,-1] = computeAbs(variantData_WithCutOff_agnostic[,-1])
+   variantData_WithoutCutOff_agnostic[,-1] = computeAbs(variantData_WithoutCutOff_agnostic[,-1])
+   
+   
+  #compute meta-features -------
+  computeMetaMax = function(dataset, featureName){
+      metaMax = apply(select(dataset, contains(featureName)), 1, max)
+      return(metaMax)
+  }
+  
+  computeMetaAverage = function(dataset, featureName){
+    metaAverage = apply(select(dataset, contains(featureName)), 1, mean)
+    return(metaAverage)
+  }
+  
+  #minus strand ---
+  variantData_WithCutOff_minus$metaAverage_differenceOfMeans = computeMetaAverage(variantData_WithCutOff_minus,
+                                                                                    "differenceOfMeans")
+  variantData_WithCutOff_minus$metaMax_differenceOfMeans = computeMetaMax(variantData_WithCutOff_minus, 
+                                                                          "differenceOfMeans")
+  variantData_WithCutOff_minus$metaAverage_differenceOfMax = computeMetaAverage(variantData_WithCutOff_minus,
+                                                                                    "differenceOfMax")
+  variantData_WithCutOff_minus$metaMax_differenceOfMax = computeMetaMax(variantData_WithCutOff_minus, 
+                                                                          "differenceOfMax")
+  variantData_WithoutCutOff_minus$metaAverage_differenceOfMeans = computeMetaAverage(variantData_WithoutCutOff_minus,
+                                                                                    "differenceOfMeans")
+  variantData_WithoutCutOff_minus$metaMax_differenceOfMeans = computeMetaMax(variantData_WithoutCutOff_minus, 
+                                                                          "differenceOfMeans")
+  variantData_WithoutCutOff_minus$metaAverage_differenceOfMax = computeMetaAverage(variantData_WithoutCutOff_minus,
+                                                                                    "differenceOfMax")
+  variantData_WithoutCutOff_minus$metaMax_differenceOfMax = computeMetaMax(variantData_WithoutCutOff_minus, 
+                                                                          "differenceOfMax")
+  
+  #plus strand ---
+  variantData_WithCutOff_plus$metaAverage_differenceOfMeans = computeMetaAverage(variantData_WithCutOff_plus,
+                                                                                    "differenceOfMeans")
+  variantData_WithCutOff_plus$metaMax_differenceOfMeans = computeMetaMax(variantData_WithCutOff_plus, 
+                                                                          "differenceOfMeans")
+  variantData_WithCutOff_plus$metaAverage_differenceOfMax = computeMetaAverage(variantData_WithCutOff_plus,
+                                                                                    "differenceOfMax")
+  variantData_WithCutOff_plus$metaMax_differenceOfMax = computeMetaMax(variantData_WithCutOff_plus, 
+                                                                          "differenceOfMax")
+  variantData_WithoutCutOff_plus$metaAverage_differenceOfMeans = computeMetaAverage(variantData_WithoutCutOff_plus,
+                                                                                    "differenceOfMeans")
+  variantData_WithoutCutOff_plus$metaMax_differenceOfMeans = computeMetaMax(variantData_WithoutCutOff_plus, 
+                                                                          "differenceOfMeans")
+  variantData_WithoutCutOff_plus$metaAverage_differenceOfMax = computeMetaAverage(variantData_WithoutCutOff_plus,
+                                                                                    "differenceOfMax")
+  variantData_WithoutCutOff_plus$metaMax_differenceOfMax = computeMetaMax(variantData_WithoutCutOff_plus, 
+                                                                          "differenceOfMax")
+  
+  #agnostic
+  variantData_WithCutOff_agnostic$metaAverage_differenceOfMeans = computeMetaAverage(variantData_WithCutOff_agnostic,
+                                                                                    "differenceOfMeans")
+  variantData_WithCutOff_agnostic$metaMax_differenceOfMeans = computeMetaMax(variantData_WithCutOff_agnostic, 
+                                                                          "differenceOfMeans")
+  variantData_WithCutOff_agnostic$metaAverage_differenceOfMax = computeMetaAverage(variantData_WithCutOff_agnostic,
+                                                                                    "differenceOfMax")
+  variantData_WithCutOff_agnostic$metaMax_differenceOfMax = computeMetaMax(variantData_WithCutOff_agnostic, 
+                                                                          "differenceOfMax")
+  variantData_WithoutCutOff_agnostic$metaAverage_differenceOfMeans = computeMetaAverage(variantData_WithoutCutOff_agnostic,
+                                                                                    "differenceOfMeans")
+  variantData_WithoutCutOff_agnostic$metaMax_differenceOfMeans = computeMetaMax(variantData_WithoutCutOff_agnostic, 
+                                                                          "differenceOfMeans")
+  variantData_WithoutCutOff_agnostic$metaAverage_differenceOfMax = computeMetaAverage(variantData_WithoutCutOff_agnostic,
+                                                                                    "differenceOfMax")
+  variantData_WithoutCutOff_agnostic$metaMax_differenceOfMax = computeMetaMax(variantData_WithoutCutOff_agnostic, 
+                                                                          "differenceOfMax")
+  
+  
+
+  #combine all TF vars
+  #combining All TF related data across strands and defining TFVars ------
+colnames(variantData_WithCutOff_plus) = paste0(colnames(variantData_WithCutOff_plus), "_Plus")
+colnames(variantData_WithoutCutOff_plus) = paste0(colnames(variantData_WithoutCutOff_plus), "_Plus")
+colnames(variantData_WithCutOff_minus) = paste0(colnames(variantData_WithCutOff_minus), "_Minus")
+colnames(variantData_WithoutCutOff_minus) = paste0(colnames(variantData_WithoutCutOff_minus), "_Minus")
+colnames(variantData_WithCutOff_agnostic) = paste0(colnames(variantData_WithCutOff_agnostic), "_Agnostic")
+colnames(variantData_WithoutCutOff_agnostic) = paste0(colnames(variantData_WithoutCutOff_agnostic), "_Agnostic")
+
+variantData_WithCutOff_all = cbind(variantData_WithCutOff_plus[,-c(1:2)], 
+                                   variantData_WithCutOff_minus[,-c(1:2)],
+                                   variantData_WithCutOff_agnostic[,-c(1:2)])
+
+variantData_WithoutCutOff_all = cbind(variantData_WithoutCutOff_plus[,-c(1:2)], 
+                                   variantData_WithoutCutOff_minus[,-c(1:2)],
+                                   variantData_WithoutCutOff_agnostic[,-c(1:2)])
+
+colnames(variantData_WithCutOff_all) = paste(colnames(variantData_WithCutOff_all), "withCutOff", sep = "_")
+colnames(variantData_WithoutCutOff_all) = paste(colnames(variantData_WithoutCutOff_all), "withoutCutOff", sep = "_")
+
+TFVars = cbind(variantData_WithCutOff_all, variantData_WithoutCutOff_all)
+  
+  #add the variant set to otherInfo -----
+  
+  otherInfo$causalVariant = NA
+  otherInfo[which(otherInfo$adj.P.Val < 0.05),"causalVariant"] = TRUE
+  otherInfo[which(otherInfo$P.Value > 0.2), "causalVariant"] = FALSE
+  
+  otherInfo$varPosInOligo = as.numeric(otherInfo$varPosInOligo)
+  
+  #define non-TFVars ----
+  data_continuous = c("AveExpr","numberVarsInOligo", "varPosInOligo", "numberOfGenes",
+                    "delta_BP","delta_A", "delta_T", "delta_G", "delta_C", "delta_TATA", "delta_ATG",
+                    "GCContentOfOligo", "GCFoldChange",
+                    "expression", "dNdS", "dNdS_adjust", "PPI",
+                    "GxGLenient", "GxGIntermediate", "GxGStrict", "distFromGene","nucleosomeScore", "phastConScore", "MAF", "DAF")
+
+  data_discrete = c("library", "SNP",
+                    "geneConflict", "essential", "isTF", "hasHumanHomolog", "hasParalog", "inANucleosome", "RMDerived")
+  
+  
+  NonTFVars = select(otherInfo, "causalVariant","logFC", data_discrete, data_continuous)
+  NonTFVars$logFC = abs(NonTFVars$logFC)
+  
+  #make all Data and rename the changeInNumberOfTFBS column to include meta tag ------
+
+allData_all = cbind(NonTFVars, TFVars)
+
+allData_all$causalVariant = as.factor(allData_all$causalVariant)
+
+allData_all[, which(!(colnames(allData_all) %in% c(data_discrete, "causalVariant")))] = apply(allData_all[, which(!(colnames(allData_all) %in% c(data_discrete, "causalVariant")))], 2, as.numeric)
+allData_all[, which(!(colnames(allData_all) %in% c(data_discrete, "causalVariant", "AveExpr")))] = apply(allData_all[, which(!(colnames(allData_all) %in% c(data_discrete, "causalVariant", "AveExpr")))], 2, abs)
+allData_all[, which(colnames(allData_all)%in% data_discrete)] = apply(allData_all[, which(colnames(allData_all) %in% data_discrete)], 2, as.factor)
+  
+  #include meta tags to change in number of TFBS columns
+colnames(allData_all)[grep(colnames(allData_all), pattern = "numberOfTFBSGainOrLost_Plus_withCutOff")] = "metaChangeInNumberOfTFBS_Plus_withCutOff"
+
+colnames(allData_all)[grep(colnames(allData_all), pattern = "numberOfTFBSGainOrLost_Minus_withCutOff")] = "metaChangeInNumberOfTFBS_Minus_withCutOff"
+
+colnames(allData_all)[grep(colnames(allData_all), pattern = "numberOfTFBSGainOrLost_Agnostic_withCutOff")] = "metaChangeInNumberOfTFBS_Agnostic_withCutOff"
+  
+  #standardize numeric variables -------
+  
+  standardize = function(x){preProcessParams = preProcess(x, method = c("center", "scale"))
+                                  return(x_std = predict(preProcessParams, x))}
+                                
+  allData_all_std = standardize(allData_all)
+  allData_all_std$logFC = allData_all$logFC #because logFC is one of your dependent variable - you don't want to standardize it.
+   
+  #define data with causalVariants = TRUE and FALSE -----
+  allData_4kVars = allData_all[!(is.na(allData_all$causalVariant)),]
+  allData_4kVars_std = allData_all_std[!(is.na(allData_all_std$causalVariant)),]
+  
+  #variantId and testName for Carl's analyses
+  
+  variantIDTestName_all = otherInfo[, c("variantID", "testName", "causalVariant")]
+  
+  #save data --------
+  #allData_all_nonAbs = cbind(variantIDTestName_all[,c(1:2)], allData_all)
+  #save(allData_all_nonAbs, 
+  #     file = paste0(dir, "data/AllVarsData_nonAbs_6kVars_WeakAndStrongBindingComputedSeparately.rda"))
+  
+  save(variantIDTestName_all,
+       allData_all,
+       allData_all_std, 
+       allData_4kVars,
+       allData_4kVars_std,
+       file = paste0(dir, "data/AllVarsData_6kVars_WeakAndStrongBindingComputedSeparately.rda"))
+
+```
+
+This chunk will use the new data which has been standardized to do
+1) pair-wise logistic regression
+2) pair-wise linear regressions for all 6k Vars
+3) pair-wise linear regressions for the reduced set of 4k Vars used in logistic regression
+
+```{r}
+library(dplyr)
+library(ISLR)
+library(rlang)
+
+dir = "~/Desktop/3UTR/" # set directory to folder downloaded from Github
+
+####Load and create data for analyses -----
+load(paste0(dir, "data/AllVarsData_6kVars_WeakAndStrongBindingComputedSeparately.rda"))
+
+###
+computeLogReg = function(allData){
+sink(paste0(dir, "results/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv")) #print the files to an output file
+  # sink(paste0(dir, "resultsOfPromoterAnalyses/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_YeastFasCo.csv")) #print the files to an output file
+
+cat(paste("FEATURE", 
+          "Estimate_FeatureOnly",
+          "pValue_FeatureOnly", 
+          "StdError_FeatureOnly",
+          "SignificanceForFeatureOnly", 
+          "Estimate_FeatureAndLibrary",
+          "pValue_FeatureAndLibrary", 
+          "StdError_FeatureAndLibrary",
+          "SignificanceForFeatureAndLibrary",
+          "ANOVA_FeatureAndLibraryVsLibrary",
+          "SignificanceOnANOVA_FeatureAndLibraryVsLibrary",
+          "Estimate_FeatureAndAveExpr",
+          "pValue_FeatureAndAveExpr", 
+          "StdError_FeatureAndAveExpr",
+          "SignificanceForFeatureAndAveExpr",
+          "ANOVA_FeatureAndAveExprVsAveExpr",
+          "SignificanceOnANOVA_FeatureAndAveExprVsAveExpr",
+          "Estimate_FeatureAndAveExprAndLibrary",
+          "pValue_FeatureAndAveExprAndLibrary", 
+          "StdError_FeatureAndAveExprAndLibrary",
+          "SignificanceForFeatureAndAveExprAndLibrary",
+          "ANOVA_FeatureAndAveExprAndLibraryVsAveExprAndLibrary",
+          "SignificanceOnANOVA_FeatureAndAveExprAndLibraryVsAveExprAndLibrary",
+          sep = ","), sep = "\n")
+
+for(i in 1:(ncol(allData))){
+  feature = colnames(allData)[i]
+  if(feature != "library"){
+    
+    #featureOnly: causalVariant~feature ------
+      formula_featureOnly = paste0("causalVariant~`", feature, "`") #formula
+      logitModel_featureOnly = glm(as.formula(formula_featureOnly), data = allData, family = binomial) #model 
+      summary_logitModel_featureOnly= summary(logitModel_featureOnly) #model summary
+    
+        #extract summary statistics - pVal, estimate, stdError 
+        FeatureOnly_rowIndex = which(grepl(feature, rownames(summary_logitModel_featureOnly$coefficients)) & !(grepl("library", rownames(summary_logitModel_featureOnly$coefficients))))
+        
+        pValueForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA, 
+                                      summary_logitModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Pr(>|z|)"])
+        
+        estimateForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA,
+                                              summary_logitModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Estimate"])
+        
+        stdErrorForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA,
+                                        summary_logitModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Std. Error"])
+    
+    #featureOnly: causalVariant~library + feature ------
+        formula_featureAndLibrary = paste0("causalVariant~library+`", feature, "`")
+        logitModel_featureAndLibrary = glm(as.formula(formula_featureAndLibrary), data = allData, family = binomial)
+        summary_logitModel_featureAndLibtary = summary(logitModel_featureAndLibrary)
+        
+        #get summary statistics - pVal, estimate and stdError
+       FeatureAndLibrary_rowIndex = which(grepl(feature, rownames(summary_logitModel_featureAndLibtary$coefficients)) & !(grepl("library", rownames(summary_logitModel_featureAndLibtary$coefficients))))
+        
+        pValueForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA, 
+                                      summary_logitModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Pr(>|z|)"])
+        
+        estimateForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA,
+                                              summary_logitModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Estimate"])
+        stdErrorForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA,
+                                              summary_logitModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Std. Error"])
+
+        #featureOnly: causalVariant~AveExpr + feature ------
+        formula_featureAndAveExpr = paste0("causalVariant~AveExpr+`", feature, "`")
+        logitModel_featureAndAveExpr = glm(as.formula(formula_featureAndAveExpr), data = allData, family = binomial)
+        summary_logitModel_featureAndAveExpr = summary(logitModel_featureAndAveExpr)
+        
+        #get summary statistics - pVal, estimate and stdError
+        FeatureAndAveExpr_rowIndex = which(grepl(feature, rownames(summary_logitModel_featureAndAveExpr$coefficients)) & !(grepl("library", rownames(summary_logitModel_featureAndAveExpr$coefficients))))
+        
+        pValueForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA, 
+                                            summary_logitModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Pr(>|z|)"])
+        
+        estimateForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA,
+                                              summary_logitModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Estimate"])
+        stdErrorForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA,
+                                              summary_logitModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Std. Error"])
+        
+        #featureOnly: causalVariant~library + AveExpr + feature ------
+        formula_featureAndLibraryAndAveExpr = paste0("causalVariant~library + AveExpr+ `", feature, "`")
+        logitModel_featureAndLibraryAndAveExpr = glm(as.formula(formula_featureAndLibraryAndAveExpr), data = allData, family = binomial)
+        summary_logitModel_featureAndLibraryAndAveExpr = summary(logitModel_featureAndLibraryAndAveExpr)
+        
+        #get summary statistics - pVal, estimate and stdError
+        featureAndLibraryAndAveExpr_rowIndex = which(grepl(feature, rownames(summary_logitModel_featureAndLibraryAndAveExpr$coefficients)) & !(grepl("library", rownames(summary_logitModel_featureAndLibraryAndAveExpr$coefficients))))
+        
+        pValueForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA, 
+                                            summary_logitModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Pr(>|z|)"])
+        
+        estimateForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA,
+                                              summary_logitModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Estimate"])
+        stdErrorForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA,
+                                              summary_logitModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Std. Error"])
+        
+    #libraryOnlyModel 
+    baseModel = glm(causalVariant~library, data = logitModel_featureAndLibrary$model, family = binomial) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    #AveExprModel
+    baseModelWithAveExpr = glm(causalVariant~AveExpr, data = logitModel_featureAndAveExpr$model, family = binomial) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    #library and AveExprModel
+    baseModelWithLibraryAndAveExpr = glm(causalVariant~library + AveExpr, data = logitModel_featureAndLibraryAndAveExpr$model, family = binomial) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    
+    #anova test comparing model: causalVariant~ library + feature to model: causalVariant~library to check if the features influence on the dependent variable is an artifact of the library or legit.
+    
+    ANOVA = anova(baseModel, logitModel_featureAndLibrary, test = "Chisq")
+    ANOVA_pValue = ANOVA$`Pr(>Chi)`[2]
+    
+    ANOVA_AveExpr = anova(baseModelWithAveExpr, logitModel_featureAndAveExpr, test = "Chisq")
+    ANOVA_AveExpr_pValue = ANOVA_AveExpr$`Pr(>Chi)`[2]
+    
+    ANOVA_LibraryAndAveExpr = anova(baseModelWithLibraryAndAveExpr, logitModel_featureAndLibraryAndAveExpr, test = "Chisq")
+    ANOVA_LibraryAndAveExpr_pValue = ANOVA_LibraryAndAveExpr$`Pr(>Chi)`[2]
+    
+    #output
+    cat(paste(feature,
+              estimateForFeatureOnly,
+              pValueForFeatureOnly,
+              stdErrorForFeatureOnly,
+              ifelse(pValueForFeatureOnly < 0.05, "significant", "notSignificant"),
+              estimateForFeatureAndLibrary,
+              pValueForFeatureAndLibrary,
+              stdErrorForFeatureAndLibrary,
+              ifelse(pValueForFeatureAndLibrary < 0.05, "significant", "notSignificant"),
+              ANOVA_pValue,
+              ifelse(ANOVA_pValue < 0.05, "significant", "notSignificant"),
+              estimateForFeatureAndAveExpr,
+              pValueForFeatureAndAveExpr,
+              stdErrorForFeatureAndAveExpr,
+              ifelse(pValueForFeatureAndAveExpr < 0.05, "significant", "notSignificant"),
+              ANOVA_AveExpr_pValue,
+              ifelse(ANOVA_AveExpr_pValue < 0.05, "significant", "notSignificant"),
+              estimateForfeatureAndLibraryAndAveExpr,
+              pValueForfeatureAndLibraryAndAveExpr,
+              stdErrorForfeatureAndLibraryAndAveExpr,
+              ifelse(pValueForfeatureAndLibraryAndAveExpr < 0.05, "significant", "notSignificant"),
+              ANOVA_LibraryAndAveExpr_pValue,
+              ifelse(ANOVA_LibraryAndAveExpr_pValue < 0.05, "significant", "notSignificant"),
+              sep = ","), sep = "\n")
+  }
+  
+}
+
+closeAllConnections()
+
+}
+
+computeLinearRegression = function(allData, moniker){
+
+allData = select(allData, -causalVariant)
+
+sink(paste0(dir, "results/logFCRegressions_",moniker,"_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv")) #print the files to an output file
+  # sink(paste0(dir, "resultsOfPromoterAnalyses/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_YeastFasCo.csv")) #print the files to an output file
+
+cat(paste("FEATURE", 
+          "Estimate_FeatureOnly",
+          "pValue_FeatureOnly", 
+          "StdError_FeatureOnly",
+          "SignificanceForFeatureOnly", 
+          "Estimate_FeatureAndLibrary",
+          "pValue_FeatureAndLibrary", 
+          "StdError_FeatureAndLibrary",
+          "SignificanceForFeatureAndLibrary",
+          "ANOVA_FeatureAndLibraryVsLibrary",
+          "SignificanceOnANOVA_FeatureAndLibraryVsLibrary",
+          "Estimate_FeatureAndAveExpr",
+          "pValue_FeatureAndAveExpr", 
+          "StdError_FeatureAndAveExpr",
+          "SignificanceForFeatureAndAveExpr",
+          "ANOVA_FeatureAndAveExprVsAveExpr",
+          "SignificanceOnANOVA_FeatureAndAveExprVsAveExpr",
+          "Estimate_FeatureAndAveExprAndLibrary",
+          "pValue_FeatureAndAveExprAndLibrary", 
+          "StdError_FeatureAndAveExprAndLibrary",
+          "SignificanceForFeatureAndAveExprAndLibrary",
+          "ANOVA_FeatureAndAveExprAndLibraryVsAveExprAndLibrary",
+          "SignificanceOnANOVA_FeatureAndAveExprAndLibraryVsAveExprAndLibrary",
+          sep = ","), sep = "\n")
+
+for(i in 1:(ncol(allData))){
+  feature = colnames(allData)[i]
+  if(feature != "library"){
+    
+    #featureOnly: logFC~feature ------
+      formula_featureOnly = paste0("logFC~`", feature, "`") #formula
+      lmModel_featureOnly = lm(as.formula(formula_featureOnly), data = allData) #model 
+      summary_lmModel_featureOnly= summary(lmModel_featureOnly) #model summary
+    
+        #extract summary statistics - pVal, estimate, stdError 
+        FeatureOnly_rowIndex = which(grepl(feature, rownames(summary_lmModel_featureOnly$coefficients)) & !(grepl("library", rownames(summary_lmModel_featureOnly$coefficients))))
+        
+        pValueForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA, 
+                                      summary_lmModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Pr(>|t|)"])
+        
+        estimateForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA,
+                                              summary_lmModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Estimate"])
+        
+        stdErrorForFeatureOnly = ifelse(is_empty(FeatureOnly_rowIndex), NA,
+                                        summary_lmModel_featureOnly$coefficients[FeatureOnly_rowIndex, "Std. Error"])
+    
+    #featureOnly: logFC~library + feature ------
+        formula_featureAndLibrary = paste0("logFC~library+`", feature, "`")
+        lmModel_featureAndLibrary = lm(as.formula(formula_featureAndLibrary), data = allData)
+        summary_lmModel_featureAndLibtary = summary(lmModel_featureAndLibrary)
+        
+        #get summary statistics - pVal, estimate and stdError
+       FeatureAndLibrary_rowIndex = which(grepl(feature, rownames(summary_lmModel_featureAndLibtary$coefficients)) & !(grepl("library", rownames(summary_lmModel_featureAndLibtary$coefficients))))
+        
+        pValueForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA, 
+                                      summary_lmModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Pr(>|t|)"])
+        
+        estimateForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA,
+                                              summary_lmModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Estimate"])
+        stdErrorForFeatureAndLibrary = ifelse(is_empty(FeatureAndLibrary_rowIndex), NA,
+                                              summary_lmModel_featureAndLibtary$coefficients[FeatureAndLibrary_rowIndex, "Std. Error"])
+
+        #featureOnly: logFC~AveExpr + feature ------
+        formula_featureAndAveExpr = paste0("logFC~AveExpr+`", feature, "`")
+        lmModel_featureAndAveExpr = lm(as.formula(formula_featureAndAveExpr), data = allData)
+        summary_lmModel_featureAndAveExpr = summary(lmModel_featureAndAveExpr)
+        
+        #get summary statistics - pVal, estimate and stdError
+        FeatureAndAveExpr_rowIndex = which(grepl(feature, rownames(summary_lmModel_featureAndAveExpr$coefficients)) & !(grepl("library", rownames(summary_lmModel_featureAndAveExpr$coefficients))))
+        
+        pValueForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA, 
+                                            summary_lmModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Pr(>|t|)"])
+        
+        estimateForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA,
+                                              summary_lmModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Estimate"])
+        stdErrorForFeatureAndAveExpr = ifelse(is_empty(FeatureAndAveExpr_rowIndex), NA,
+                                              summary_lmModel_featureAndAveExpr$coefficients[FeatureAndAveExpr_rowIndex, "Std. Error"])
+        
+        #featureOnly: logFC~library + AveExpr + feature ------
+        formula_featureAndLibraryAndAveExpr = paste0("logFC~library + AveExpr+ `", feature, "`")
+        lmModel_featureAndLibraryAndAveExpr = lm(as.formula(formula_featureAndLibraryAndAveExpr), data = allData)
+        summary_lmModel_featureAndLibraryAndAveExpr = summary(lmModel_featureAndLibraryAndAveExpr)
+        
+        #get summary statistics - pVal, estimate and stdError
+        featureAndLibraryAndAveExpr_rowIndex = which(grepl(feature, rownames(summary_lmModel_featureAndLibraryAndAveExpr$coefficients)) & !(grepl("library", rownames(summary_lmModel_featureAndLibraryAndAveExpr$coefficients))))
+        
+        pValueForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA, 
+                                            summary_lmModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Pr(>|t|)"])
+        
+        estimateForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA,
+                                              summary_lmModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Estimate"])
+        stdErrorForfeatureAndLibraryAndAveExpr = ifelse(is_empty(featureAndLibraryAndAveExpr_rowIndex), NA,
+                                              summary_lmModel_featureAndLibraryAndAveExpr$coefficients[featureAndLibraryAndAveExpr_rowIndex, "Std. Error"])
+        
+    #libraryOnlyModel 
+    baseModel = lm(logFC~library, data = lmModel_featureAndLibrary$model) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    #AveExprModel
+    baseModelWithAveExpr = lm(logFC~AveExpr, data = lmModel_featureAndAveExpr$model) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    #library and AveExprModel
+    baseModelWithLibraryAndAveExpr = lm(logFC~library + AveExpr, data = lmModel_featureAndLibraryAndAveExpr$model) #we call data like this to avoid the problems due to missing entires in some feature columns
+    
+    
+    #anova test comparing model: logFC~ library + feature to model: logFC~library to check if the features influence on the dependent variable is an artifact of the library or legit.
+    
+    ANOVA = anova(baseModel, lmModel_featureAndLibrary, test = "Chisq")
+    ANOVA_pValue = ANOVA$`Pr(>Chi)`[2]
+    
+    ANOVA_AveExpr = anova(baseModelWithAveExpr, lmModel_featureAndAveExpr, test = "Chisq")
+    ANOVA_AveExpr_pValue = ANOVA_AveExpr$`Pr(>Chi)`[2]
+    
+    ANOVA_LibraryAndAveExpr = anova(baseModelWithLibraryAndAveExpr, lmModel_featureAndLibraryAndAveExpr, test = "Chisq")
+    ANOVA_LibraryAndAveExpr_pValue = ANOVA_LibraryAndAveExpr$`Pr(>Chi)`[2]
+    
+    #output
+    cat(paste(feature,
+              estimateForFeatureOnly,
+              pValueForFeatureOnly,
+              stdErrorForFeatureOnly,
+              ifelse(pValueForFeatureOnly < 0.05, "significant", "notSignificant"),
+              estimateForFeatureAndLibrary,
+              pValueForFeatureAndLibrary,
+              stdErrorForFeatureAndLibrary,
+              ifelse(pValueForFeatureAndLibrary < 0.05, "significant", "notSignificant"),
+              ANOVA_pValue,
+              ifelse(ANOVA_pValue < 0.05, "significant", "notSignificant"),
+              estimateForFeatureAndAveExpr,
+              pValueForFeatureAndAveExpr,
+              stdErrorForFeatureAndAveExpr,
+              ifelse(pValueForFeatureAndAveExpr < 0.05, "significant", "notSignificant"),
+              ANOVA_AveExpr_pValue,
+              ifelse(ANOVA_AveExpr_pValue < 0.05, "significant", "notSignificant"),
+              estimateForfeatureAndLibraryAndAveExpr,
+              pValueForfeatureAndLibraryAndAveExpr,
+              stdErrorForfeatureAndLibraryAndAveExpr,
+              ifelse(pValueForfeatureAndLibraryAndAveExpr < 0.05, "significant", "notSignificant"),
+              ANOVA_LibraryAndAveExpr_pValue,
+              ifelse(ANOVA_LibraryAndAveExpr_pValue < 0.05, "significant", "notSignificant"),
+              sep = ","), sep = "\n")
+  }
+  
+}
+
+closeAllConnections()
+
+}
+
+      computeLogReg(allData_4kVars_std)
+      
+      computeLinearRegression(allData_all_std, "6kVars")
+      
+      computeLinearRegression(allData_4kVars_std, "4kVars")
+
+```
+
+This chunk will plot the univariate logistic and linear regression results
+
+```{r}
+library(ggpubr)
+library(forcats)
+library(qvalue)
+library(readr)
+library(stringr)
+library(dplyr)
+
+dir = "~/Desktop/3UTR/" # set directory to folder downloaded from Github
+
+#all logNet
+allLogNet = read_csv(paste0(dir,"results/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"))
+
+allLogNet$adj.P.val_FeatureAndAveExprAndLibrary = qvalue(allLogNet$pValue_FeatureAndAveExprAndLibrary)$qvalues
+
+  write.csv(allLogNet, 
+            file = paste0(dir, "results/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"),
+            quote = FALSE, row.names = FALSE, col.names = TRUE)
+  
+  
+#all LmNet_6kvars
+allLmNet_6kVars = read_csv(paste0(dir,"results/logFCRegressions_6kVars_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"))
+
+allLmNet_6kVars$adj.P.val_FeatureAndAveExprAndLibrary = qvalue(allLmNet_6kVars$pValue_FeatureAndAveExprAndLibrary)$qvalues
+  
+  write.csv(allLmNet_6kVars, 
+            file = paste0(dir, "results/logFCRegressions_6kVars_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"),
+            quote = FALSE, row.names = FALSE, col.names = TRUE)
+  
+#allLmNet_4kVars
+allLmNet_4kVars = read_csv(paste0(dir,"results/logFCRegressions_4kVars_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"))
+
+allLmNet_4kVars$adj.P.val_FeatureAndAveExprAndLibrary = qvalue(allLmNet_4kVars$pValue_FeatureAndAveExprAndLibrary)$qvalues
+  
+  write.csv(allLmNet_4kVars, 
+            file = paste0(dir, "results/logFCRegressions_4kVars_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"),
+            quote = FALSE, row.names = FALSE, col.names = TRUE)
+  
+
+
+######
+
+#create custome Palette
+  colorMap = c(Agnostic = "#FFF9900",
+               Plus = "#666000" ,
+               Minus = "#660033",
+               plusAndMinus = "#FFCC00",
+               All = "#FFFF00" ,
+               variantConservation = "#CC00CC",
+               sequenceDescriptors = "#663366",
+               parentGeneDescriptors = "#990033",
+               physicalDistanceInGenome = "#336600",
+               differenceOfMaxPWMScore_StrongBindingOnly = "#003366",
+               differenceOfMeanPWMScore_StrongBindingOnly = "#993300" ,
+               differenceOfMaxPWMScore_WeakBindingOnly ="#FF3300" ,
+               differenceOfMeanPWMScore_WeakBindingOnly= "#339999",
+               changeInNumberOfStrongTFBS = "#339900",
+               StrongOnly = "#CC0033",
+               WeakOnly = "#CC9900"
+  )
+  
+  myPalette = scale_fill_manual(values = colorMap)
+  
+plotLogNet = function(allLogNet, moniker){
+StrandAgnosticRows = grep(allLogNet$FEATURE, pattern = "Agnostic")
+
+allLogNet_plotting = allLogNet[-c(1,2,StrandAgnosticRows),]
+
+plottingData = as.data.frame(allLogNet_plotting$FEATURE)
+colnames(plottingData) = "feature"
+
+plottingData$estimate = allLogNet_plotting$Estimate_FeatureAndAveExprAndLibrary
+plottingData$error = allLogNet_plotting$StdError_FeatureAndAveExprAndLibrary
+plottingData$adj.pValue = allLogNet_plotting$adj.P.val_FeatureAndAveExprAndLibrary
+plottingData$significance = ifelse(plottingData$adj.pValue<0.05, "significant", "NS")
+plottingData$pValue = allLogNet_plotting$pValue_FeatureAndAveExprAndLibrary
+
+plottingData$sigLabel = ""
+plottingData$sigLabel[plottingData$pValue < 0.05] = "*"
+plottingData$sigLabel[plottingData$adj.pValue < 0.05] = "***"
+
+plottingData$labelCoordinates = ifelse(plottingData$estimate < 0, 
+                                       plottingData$estimate - plottingData$error - 0.05,
+                                       plottingData$estimate + plottingData$error + 0.05)
+
+plottingData$feature = as.character(plottingData$feature)
+
+
+#differentFeatureTypes
+variantConservation = which(plottingData$feature %in% c("phastConScore", "MAF", "DAF", "RMDerived"))
+physicalDistanceInGenome = which(plottingData$feature == "distFromGene")
+alleleSequenceDescriptors = which(plottingData$feature %in% c("SNP", "numberVarsInOligo", "varPosInOligo", "inANucleosome",
+                                                              "delta_BP", "delta_A", "delta_T", "delta_C", "delta_G","delta_TATA", "delta_ATG",
+                                                              "GCFoldChange", "GCContentOfOligo"))
+geneLevelDescriptors = which(plottingData$feature %in% c("numberOfGenes", "geneConflict", "essential", 
+                                                         "isTF", "hasHumanHomolog","hasParalog","expression", 
+                                                         "dNdS", "dNdS_adjust", "PPI", 
+                                                         "GxGLenient", "GxGStrict", "GxGIntermediate", "nucleosomeScore"))
+expressionOfOligoRelated = which(plottingData$feature == "AveExpr")
+
+TFDifferenceOfMaxWithoutCutOff = which(grepl(plottingData$feature, pattern = "withoutCutOff") 
+                                       & grepl(plottingData$feature, pattern = "differenceOfMax"))
+TFDifferenceOfMeansWithoutCutOff = which(grepl(plottingData$feature, pattern = "withoutCutOff") 
+                                         & grepl(plottingData$feature, pattern = "differenceOfMeans"))
+TFDifferenceOfMaxWithCutOff = which(grepl(plottingData$feature, pattern = "withCutOff") 
+                                    & grepl(plottingData$feature, pattern = "differenceOfMax"))
+TFDifferenceOfMeansWithCutOff = which(grepl(plottingData$feature, pattern = "withCutOff") 
+                                      & grepl(plottingData$feature, pattern = "differenceOfMeans"))
+TFDeltaSignificantBS = c(which(grepl(plottingData$feature, pattern = "withCutOff") 
+                               & grepl(plottingData$feature, pattern = "deltaSignificantBindingSites")),
+                        grep(plottingData$feature, pattern = "ChangeInNumberOfTFBS"))
+
+plottingData$featureType = ""
+
+plottingData$featureType[variantConservation] = "variantConservation"
+plottingData$featureType[physicalDistanceInGenome] = "physicalDistanceInGenome"
+plottingData$featureType[alleleSequenceDescriptors] = "sequenceDescriptors"
+plottingData$featureType[geneLevelDescriptors] = "parentGeneDescriptors"
+plottingData$featureType[expressionOfOligoRelated] = "expressionOfOligo"
+#plottingData$featureType[TFDifferenceOfMaxWithoutCutOff] = "differenceOfMaxPWMScore_StrongAndWeakBindingConsidered"
+#plottingData$featureType[TFDifferenceOfMeansWithoutCutOff] = "differenceOfMeanPWMScore_StrongAndWeakBindingConsidered"
+plottingData$featureType[TFDifferenceOfMaxWithoutCutOff] = "differenceOfMaxPWMScore_WeakBindingOnly"
+plottingData$featureType[TFDifferenceOfMeansWithoutCutOff] = "differenceOfMeanPWMScore_WeakBindingOnly"
+plottingData$featureType[TFDifferenceOfMaxWithCutOff] = "differenceOfMaxPWMScore_StrongBindingOnly"
+plottingData$featureType[TFDifferenceOfMeansWithCutOff] = "differenceOfMeanPWMScore_StrongBindingOnly"
+plottingData$featureType[TFDeltaSignificantBS] = "changeInNumberOfStrongTFBS"
+
+minusRows = grep(plottingData$feature, pattern = "Minus")
+plusRows = grep(plottingData$feature, pattern = "Plus")
+
+plottingData$strand = NA
+
+plottingData$strand[minusRows] = "Minus"
+plottingData$strand[plusRows] = "Plus"
+
+#this is to remove all the extra names and just keep the TF name
+featureNames = as.data.frame(unlist(str_split(plottingData$feature[-c(1:33)], "_")))
+rows = which(as.character(featureNames[,1]) %in% c("Minus", "Plus", "withCutOff", "withoutCutOff", "differenceOfMax", "differenceOfMeans", "deltaSignificantBindingSites"))
+featureText = featureNames[-rows,1]
+featureText = as.character(featureNames[-rows,1])
+plottingData$feature[-c(1:33)] = featureText
+
+#set a color palette for consistent colors of feature types across different graphs
+
+
+  #Bar plot for non-TF Features
+pdf(paste0(dir,"results/",moniker,"_barPlot_NonTFBindingMetrics_standardized.pdf"), width = 10)
+
+
+plot = ggbarplot(plottingData[1:33,],
+          x = "feature",
+          y = "estimate",
+          fill = "featureType",
+          #color = "featureType",
+          #alpha = "significance",
+          title = "Pairwise Regression Estimates - TF binding unrelated descriptors",
+          remove = c("AveExpr", "library"),
+          sort.val = "desc",
+          sort.by.groups = FALSE)+ geom_errorbar(aes(ymin = estimate-error, ymax = estimate+error), width = 0.2) +
+  guides(fill = guide_legend(nrow=2), alpha = guide_legend(nrow = 2),
+                                          color = guide_legend(nrow =2)) + 
+  geom_text(mapping = aes(x = feature, y = labelCoordinates, label = sigLabel), fontface = "bold", color = "#00BFC4") + theme_bw() + theme(legend.position = "top") + myPalette +
+  theme(axis.text.x = element_text(angle = 90))#+ coord_flip() 
+
+print(plot)
+dev.off()
+
+    #meta-metrics
+pdf(paste0(dir,"results/",moniker,"_barPlot_MetaMetrics_standardized.pdf"), width = 10)
+
+metaFeatures = plottingData[grep("meta", plottingData$feature),]
+metaFeatures$featureStrand = paste(metaFeatures$feature, metaFeatures$strand, sep = "_")
+metaFeatures$feature = factor(metaFeatures$feature, levels = c("metaAverage", "metaMax", "metaChangeInNumberOfTFBS"))
+metaFeatures$featureType = factor(metaFeatures$featureType, levels = c("changeInNumberOfStrongTFBS", "differenceOfMaxPWMScore_WeakBindingOnly","differenceOfMaxPWMScore_StrongBindingOnly", "differenceOfMeanPWMScore_WeakBindingOnly","differenceOfMeanPWMScore_StrongBindingOnly" ))
+
+
+plot = ggplot(data = metaFeatures,
+       aes(x = feature,
+           y = estimate,
+           ymin = estimate-error,
+           ymax = estimate + error,
+           fill = featureType,
+           )) + geom_col(position=position_dodge(width = 0.5), width = 0.4) + 
+                geom_errorbar(width = 0.2, position = position_dodge(width = 0.5)) + 
+                #geom_point(position = position_dodge(0.5), aes(y = estimate, color = featureType)) +
+                facet_grid(cols = vars(strand)) +
+                guides(fill = guide_legend(nrow=5), alpha = guide_legend(nrow = 2),
+                        color = guide_legend(nrow =5)) +  scale_color_manual(values = colorMap) +
+                scale_fill_manual(values = colorMap) +
+                geom_text(mapping = aes(x = feature, y = labelCoordinates, label = sigLabel), color = "#00BFC4",
+                          fontface = "bold", position = position_dodge(width = 0.5) ) + 
+                theme_bw() + theme(legend.position = "top") + coord_flip()
+
+print(plot)
+
+dev.off()
+
+  #Radial and flipped bar plots for TF Features ====
+
+plottingDataForAllEstimates = filter(plottingData, strand == "Plus" )[, c("feature", "estimate", "featureType", "adj.pValue", "significance")]
+colnames(plottingDataForAllEstimates) = c("feature", paste0(colnames(plottingDataForAllEstimates)[-1], "_plus"))
+plottingDataForAllEstimates = cbind(plottingDataForAllEstimates, filter(plottingData, strand == "Minus")[, c("estimate", "featureType", "adj.pValue", "significance")])
+colnames(plottingDataForAllEstimates)[-c(1:5)] = paste0(colnames(plottingDataForAllEstimates)[-c(1:5)], "_minus")
+
+totalBarHeight = plottingDataForAllEstimates %>% group_by(feature) %>% summarise(totalHeight = sum(sqrt(abs(estimate_plus)), na.rm = TRUE))
+plottingDataForAllEstimates$totalBarHeight = 0
+
+for(i in 1:nrow(totalBarHeight)){
+  feature = totalBarHeight$feature[i];
+  plottingDataForAllEstimates$totalBarHeight[which(plottingDataForAllEstimates$feature == feature)] = totalBarHeight$totalHeight[i]
+  
+}
+
+pdf(paste0(dir,"results/estimatesForAllFeatures_",moniker,"_flippedBarPlot_plusVsMinus_standardized.pdf"), height = 50, width = 25)
+
+
+plot1 = ggplot(plottingDataForAllEstimates[-grep(plottingDataForAllEstimates$feature, pattern = "meta"),],
+              aes(x= fct_reorder(feature, dplyr::desc(totalBarHeight)))) +
+  geom_col(aes(y = sqrt(abs(estimate_plus)), fill = featureType_plus,alpha = ifelse(adj.pValue_plus<0.05,1,0.5)), color = "black") + 
+  geom_col(aes(y = -sqrt(abs(estimate_minus)), fill = featureType_minus, alpha = ifelse(adj.pValue_minus<0.05,1,0.5)), color = "dark red") + 
+  ggtitle("Pairwise logistic regression estimates For TF-related variables - Plus vs Minus Strand") + #scale_fill_manual(values = myPalette) +
+  theme_classic() + ylim(-7,7)  +
+   myPalette
+
+print(plot1)
+dev.off()
+
+pdf(paste0(dir,"results/estimatesForAllFeatures_",moniker,"_RadialBarPlot_plusVsMinus_standardized.pdf"), height = 25, width = 35)
+plot = ggplot(plottingDataForAllEstimates[-grep(plottingDataForAllEstimates$feature, pattern = "meta"),],
+              aes(x= fct_reorder(feature, dplyr::desc(totalBarHeight)))) +
+  geom_col(aes(y = sqrt(abs(estimate_plus)), fill = featureType_plus,alpha = ifelse(adj.pValue_plus<0.05,1,0.5)), color = "black") + 
+  geom_col(aes(y = -sqrt(abs(estimate_minus)), fill = featureType_minus, alpha = ifelse(adj.pValue_minus<0.05,1,0.5)), color = "dark red") + 
+  ggtitle("Pairwise logistic regression estimates For TF-related variables - Plus vs Minus Strand") + #scale_fill_manual(values = myPalette) +
+   theme_bw() + ylim(-5,7) +
+  coord_polar() + myPalette
+
+print(plot)
+dev.off()
+
+plottingData_Tf_plus = select(plottingDataForAllEstimates, feature, estimate_plus, featureType_plus, 
+                              adj.pValue_plus, significance_plus, totalBarHeight)
+colnames(plottingData_Tf_plus) = c("feature", "estimate", "featureType", "adj.pValue", "significance", "totalBarHeight_plus")
+plottingData_Tf_plus$sqrtAbsEstimate = sqrt(abs(plottingData_Tf_plus$estimate)) 
+plottingData_Tf_plus$strand = "Plus"
+
+plottingData_Tf_minus = select(plottingDataForAllEstimates, feature, estimate_minus, featureType_minus, 
+                              adj.pValue_minus, significance_minus, totalBarHeight)
+colnames(plottingData_Tf_minus) = c("feature", "estimate", "featureType", "adj.pValue", "significance", "totalBarHeight_plus")
+plottingData_Tf_minus$sqrtAbsEstimate = sqrt(abs(plottingData_Tf_minus$estimate)) 
+plottingData_Tf_minus$strand = "Minus"
+
+plottingData_Tf = rbind(plottingData_Tf_plus, plottingData_Tf_minus)
+plottingData_Tf = plottingData_Tf[-grep(plottingData_Tf$feature, pattern = "meta"),]
+plottingData_Tf$strand = factor(plottingData_Tf$strand, levels = c("Plus", "Minus"))
+
+pdf(paste0(dir,"results/estimatesForAllFeatures_",moniker,"_flippedBarPlot_facingEachOther_plusVsMinus_standardized.pdf"), height = 50, width = 25)
+
+
+plot1 = ggplot(plottingData_Tf,
+              aes(x= fct_reorder(feature, dplyr::desc(totalBarHeight_plus)))) +
+  geom_col(aes(y = sqrtAbsEstimate, fill = featureType, alpha = ifelse(adj.pValue<0.05,1,0.5)), color = "black")  + 
+  facet_grid(cols = vars(strand)) +
+  ggtitle("Pairwise logistic regression estimates For TF-related variables \nPlus vs Minus Strand") +
+  theme_bw() + ylim(0,7)  +
+    coord_flip() + myPalette
+
+print(plot1)
+dev.off()
+
+
+
+
+  #heatmaps =======
+
+pdf(paste0(dir,"results/estimatesForAllFeatures_",moniker,"_heatMap_PlusVsMinus_standardized.pdf"), height = 25, width = 15)
+
+plottingDataForHeatMap = plottingData[-c(1:31),]
+plottingDataForHeatMap$estimate[which(plottingDataForHeatMap$significance == "NS")] = 0
+plottingDataForHeatMap$sqrtEstimate = sqrt(abs(plottingDataForHeatMap$estimate))
+plottingDataForHeatMap = plottingDataForHeatMap[-grep(plottingDataForHeatMap$feature, pattern = "meta"),]
+plottingDataForHeatMap$feature = as.factor(plottingDataForHeatMap$feature)
+#plottingDataForHeatMap$featureType = factor(plottingDataForHeatMap$featureType, 
+#                                            levels = c("differenceOfMaxPWMScore_StrongAndWeakBindingConsidered",
+#                                                       "differenceOfMeanPWMScore_StrongAndWeakBindingConsidered",
+#                                                       "differenceOfMaxPWMScore_StrongBindingOnly",
+#                                                       "differenceOfMeanPWMScore_StrongBindingOnly",
+#                                                       "changeInNumberOfStrongTFBS"))
+
+plottingDataForHeatMap$featureType = factor(plottingDataForHeatMap$featureType, 
+                                            levels = c("differenceOfMaxPWMScore_WeakBindingOnly",
+                                                       "differenceOfMeanPWMScore_WeakBindingOnly",
+                                                       "differenceOfMaxPWMScore_StrongBindingOnly",
+                                                       "differenceOfMeanPWMScore_StrongBindingOnly",
+                                                       "changeInNumberOfStrongTFBS")) 
+
+plot_heatmap = ggplot(data = plottingDataForHeatMap[which(plottingDataForHeatMap$feature %in% c("SWI4")),],
+                       aes(x = strand,
+                           y = feature,
+                           fill = sqrtEstimate)) +
+                  geom_tile() + facet_grid(~ featureType, switch = "y", scales = "free_y", space = "free_y",   
+                                           labeller = labeller(featureType = label_wrap_gen(5))) + 
+                 theme_bw() + scale_fill_viridis_c() + xlab("") + ylab ("")
+
+print(plot_heatmap)
+
+dev.off()
+
+
+  #violin plots =====
+
+
+pdf(paste0(dir,"results/estimatesForDifferentFeatureTypes_",moniker,"_significantVarsAt5PercentFDR_facetByStrand_standardized.pdf"))
+
+plottingData$sqrtEstimate = sqrt(abs(plottingData$estimate))
+plot1 = ggviolin(filter(plottingData, !is.na(strand) ),
+         x = "strand", 
+         y = "sqrtEstimate",
+         add = "boxplot",
+         color = "strand", 
+         combine = TRUE) + stat_compare_means(label.x.npc = "center", label.y.npc = "center") +
+  ylab("sqrt(abs(Estimate))")  + myPalette #+ coord_flip()
+
+
+plot2 =ggviolin(filter(plottingData, !(is.na(strand))),#filter(plottingData, significance == "significant", !is.na(strand)),
+         x = "strand",
+         y = "sqrtEstimate",
+         add = "boxplot",
+         color = "strand",
+         facet.by = "featureType",
+         combine = TRUE)  + stat_compare_means(label.x.npc = "center", label.y.npc = "center")+ myPalette +
+  ylim (0,7.5) + ylab("sqrt(abs(Estimate))") + coord_flip()
+
+print(set_palette(plot1, palette = colorMap))
+print(set_palette(plot2, palette = colorMap))
+
+dev.off()
+
+
+
+  #violin plot for estimate by feature type
+pdf(paste0(dir,"results/xyz_facetByFeatureType.pdf"))
+
+plottingData_vioPlots = filter(plottingData, !is.na(strand))
+plottingData_vioPlots$estimate = sqrt(abs(plottingData_vioPlots$estimate))
+plottingData_vioPlots$strengthOfBinding = "StrongOnly"
+#plottingData_vioPlots$strengthOfBinding[grep("WeakBinding", plottingData_vioPlots$featureType)] = "StrongAndWeak"
+plottingData_vioPlots$strengthOfBinding[grep("WeakBinding", plottingData_vioPlots$featureType)] = "WeakOnly"
+plottingData_vioPlots$featureLevel = ifelse(grepl(plottingData_vioPlots$feature, pattern = "meta"), "Meta", "Individual")
+
+plot1 = ggviolin(filter(plottingData_vioPlots, significance == "significant", featureLevel == "Individual"),
+         x = "featureType",
+         y = "estimate",
+         add = "boxplot",
+         color = "featureType",
+         combine = TRUE)  + 
+  stat_compare_means(label = "p.signif", method = "wilcox.test", ref.group = ".all.", label.y = 0.6 , color = "maroon", size = 5) +
+  stat_compare_means(method= "anova", label.y = 0.3, label.x = 5.5, color = "darkblue") + myPalette +
+  guides(color = guide_legend(nrow = 3)) + ylab("sqrt(abs(estimate)))") + coord_flip()
+
+plot2 = ggviolin(filter(plottingData_vioPlots, significance == "significant"),
+         x = "strengthOfBinding",
+         y = "estimate",
+         add = "boxplot",
+         color = "strengthOfBinding",
+         #facet.by = "strand",
+         combine = TRUE)  + 
+  #stat_compare_means(method = "wilcox.test", 
+  #                   comparisons = list(c("StrongAndWeak", "StrongOnly")),color = "maroon", size = 5, label.y = 0.8) +
+   stat_compare_means(method = "wilcox.test", 
+                     comparisons = list(c("WeakOnly", "StrongOnly")),color = "maroon", size = 5, label.y = 0.61) +
+  #stat_compare_means(method= "anova", label.y = 0.3, label.x = 5.5, color = "darkblue") + scale_color_manual(values = myPalette) +
+  ylab("sqrt(abs(estimate)))") 
+
+plot3 = gghistogram(plottingData_vioPlots, 
+            x = "adj.pValue",
+            y = "..density..",
+            combine = TRUE,
+            xlab = "adjusted p-value",
+            bins = 100,
+            rug = TRUE,                      # Add marginal rug
+            color = "strengthOfBinding", 
+            fill = "strengthOfBinding") + geom_vline(xintercept = 0.05) + myPalette
+
+print(set_palette(plot1, palette = colorMap))
+print(set_palette(plot2, palette = colorMap))
+print(set_palette(plot3, palette = colorMap))
+
+dev.off()
+
+}
+  
+plotLMNet = function(allLogNet, moniker){
+StrandAgnosticRows = grep(allLogNet$FEATURE, pattern = "Agnostic")
+
+allLogNet_plotting = allLogNet[-c(1,StrandAgnosticRows),]
+
+plottingData = as.data.frame(allLogNet_plotting$FEATURE)
+colnames(plottingData) = "feature"
+
+plottingData$estimate = allLogNet_plotting$Estimate_FeatureAndAveExprAndLibrary
+plottingData$error = allLogNet_plotting$StdError_FeatureAndAveExprAndLibrary
+plottingData$adj.pValue = allLogNet_plotting$adj.P.val_FeatureAndAveExprAndLibrary
+plottingData$significance = ifelse(plottingData$adj.pValue<0.05, "significant", "NS")
+plottingData$pValue = allLogNet_plotting$pValue_FeatureAndAveExprAndLibrary
+
+plottingData$sigLabel = ""
+plottingData$sigLabel[plottingData$pValue < 0.05] = "*"
+plottingData$sigLabel[plottingData$adj.pValue < 0.05] = "***"
+
+plottingData$labelCoordinates = ifelse(plottingData$estimate < 0, 
+                                       plottingData$estimate - plottingData$error - 0.001,
+                                       plottingData$estimate + plottingData$error + 0.001)
+
+plottingData$feature = as.character(plottingData$feature)
+
+
+#differentFeatureTypes
+variantConservation = which(plottingData$feature %in% c("phastConScore", "MAF", "DAF", "RMDerived"))
+physicalDistanceInGenome = which(plottingData$feature == "distFromGene")
+alleleSequenceDescriptors = which(plottingData$feature %in% c("SNP", "numberVarsInOligo", "varPosInOligo",
+                                                              "inANucleosome", "delta_BP", "delta_A", "delta_T",
+                                                              "delta_C", "delta_G","delta_TATA", "delta_ATG",
+                                                              "GCFoldChange", "GCContentOfOligo"))
+geneLevelDescriptors = which(plottingData$feature %in% c("numberOfGenes", "geneConflict", "essential", 
+                                                         "isTF", "hasHumanHomolog","hasParalog","expression", 
+                                                         "dNdS", "dNdS_adjust", "PPI", 
+                                                         "GxGLenient", "GxGStrict", "GxGIntermediate", "nucleosomeScore"))
+expressionOfOligoRelated = which(plottingData$feature == "AveExpr")
+
+TFDifferenceOfMaxWithoutCutOff = which(grepl(plottingData$feature, pattern = "withoutCutOff") 
+                                       & grepl(plottingData$feature, pattern = "differenceOfMax"))
+TFDifferenceOfMeansWithoutCutOff = which(grepl(plottingData$feature, pattern = "withoutCutOff") 
+                                         & grepl(plottingData$feature, pattern = "differenceOfMeans"))
+TFDifferenceOfMaxWithCutOff = which(grepl(plottingData$feature, pattern = "withCutOff") 
+                                    & grepl(plottingData$feature, pattern = "differenceOfMax"))
+TFDifferenceOfMeansWithCutOff = which(grepl(plottingData$feature, pattern = "withCutOff") 
+                                      & grepl(plottingData$feature, pattern = "differenceOfMeans"))
+TFDeltaSignificantBS = c(which(grepl(plottingData$feature, pattern = "withCutOff") 
+                               & grepl(plottingData$feature, pattern = "deltaSignificantBindingSites")),
+                        grep(plottingData$feature, pattern = "ChangeInNumberOfTFBS"))
+
+plottingData$featureType = ""
+
+plottingData$featureType[variantConservation] = "variantConservation"
+plottingData$featureType[physicalDistanceInGenome] = "physicalDistanceInGenome"
+plottingData$featureType[alleleSequenceDescriptors] = "sequenceDescriptors"
+plottingData$featureType[geneLevelDescriptors] = "parentGeneDescriptors"
+plottingData$featureType[expressionOfOligoRelated] = "expressionOfOligo"
+#plottingData$featureType[TFDifferenceOfMaxWithoutCutOff] = "differenceOfMaxPWMScore_StrongAndWeakBindingConsidered"
+#plottingData$featureType[TFDifferenceOfMeansWithoutCutOff] = "differenceOfMeanPWMScore_StrongAndWeakBindingConsidered"
+plottingData$featureType[TFDifferenceOfMaxWithoutCutOff] = "differenceOfMaxPWMScore_WeakBindingOnly"
+plottingData$featureType[TFDifferenceOfMeansWithoutCutOff] = "differenceOfMeanPWMScore_WeakBindingOnly"
+plottingData$featureType[TFDifferenceOfMaxWithCutOff] = "differenceOfMaxPWMScore_StrongBindingOnly"
+plottingData$featureType[TFDifferenceOfMeansWithCutOff] = "differenceOfMeanPWMScore_StrongBindingOnly"
+plottingData$featureType[TFDeltaSignificantBS] = "changeInNumberOfStrongTFBS"
+
+minusRows = grep(plottingData$feature, pattern = "Minus")
+plusRows = grep(plottingData$feature, pattern = "Plus")
+
+plottingData$strand = NA
+
+plottingData$strand[minusRows] = "Minus"
+plottingData$strand[plusRows] = "Plus"
+
+#this is to remove all the extra names and just keep the TF name
+featureNames = as.data.frame(unlist(str_split(plottingData$feature[-c(1:34)], "_")))
+rows = which(as.character(featureNames[,1]) %in% c("Minus", "Plus", "withCutOff", "withoutCutOff", "differenceOfMax", "differenceOfMeans", "deltaSignificantBindingSites"))
+featureText = featureNames[-rows,1]
+featureText = as.character(featureNames[-rows,1])
+plottingData$feature[-c(1:34)] = featureText
+
+#set a color palette for consistent colors of feature types across different graphs
+
+
+  #Bar plot for non-TF Features
+pdf(paste0(dir,"results/",moniker,"_barPlot_NonTFBindingMetrics_standardized.pdf"), width = 10)
+plot = ggbarplot(plottingData[1:34,],
+          x = "feature",
+          y = "estimate",
+          fill = "featureType",
+          #color = "featureType",
+          #alpha = "significance",
+          title = "Pairwise Regression Estimates - TF binding unrelated descriptors",
+          remove = c("AveExpr", "library"),
+          sort.val = "desc",
+          sort.by.groups = FALSE)+ geom_errorbar(aes(ymin = estimate-error, ymax = estimate+error), width = 0.2) +
+  guides(fill = guide_legend(nrow=2), alpha = guide_legend(nrow = 2),
+                                          color = guide_legend(nrow =2)) +
+  geom_text(mapping = aes(x = feature, y = labelCoordinates, label = sigLabel),
+            fontface = "bold", color = "#00BFC4" ) + theme_bw() + theme(legend.position = "top")+ coord_flip() + myPalette
+
+print(plot)
+
+dev.off()
+
+  ##meta metrics
+
+pdf(paste0(dir,"results/",moniker,"_barPlot_MetaMetrics_standardized.pdf"), width = 10)
+
+metaFeatures = plottingData[grep("meta", plottingData$feature),]
+metaFeatures$featureStrand = paste(metaFeatures$feature, metaFeatures$strand, sep = "_")
+
+plot = ggplot(data = metaFeatures,
+       aes(x = feature,
+           y = estimate,
+           ymin = estimate-error,
+           ymax = estimate + error,
+           fill = featureType,
+           )) + geom_col(position=position_dodge(width = 0.5), width = 0.4) + 
+                geom_errorbar(width = 0.2, position = position_dodge(width = 0.5)) + 
+                geom_point(position = position_dodge(0.5), aes(y = estimate, color = featureType)) +
+                facet_grid(cols = vars(strand)) +
+                guides(fill = guide_legend(nrow=5), alpha = guide_legend(nrow = 2),
+                        color = guide_legend(nrow =5)) +  scale_color_manual(values = colorMap) +
+                scale_fill_manual(values = colorMap) +
+                geom_text(mapping = aes(x = feature, y = labelCoordinates, label = sigLabel), color = "#00BFC4",
+                          fontface = "bold", position = position_dodge(width = 0.5)) + 
+                theme_bw() + theme(legend.position = "top") +
+                coord_flip()
+
+print(plot)
+dev.off()
+
+  #Radial and flipped bar plots for TF Features ======
+
+plottingDataForAllEstimates = filter(plottingData, strand == "Plus")[, c("feature", "estimate", "featureType", "adj.pValue", "significance")]
+colnames(plottingDataForAllEstimates) = c("feature", paste0(colnames(plottingDataForAllEstimates)[-1], "_plus"))
+plottingDataForAllEstimates = cbind(plottingDataForAllEstimates, filter(plottingData, strand == "Minus")[, c("estimate", "featureType", "adj.pValue", "significance")])
+colnames(plottingDataForAllEstimates)[-c(1:5)] = paste0(colnames(plottingDataForAllEstimates)[-c(1:5)], "_minus")
+
+totalBarHeight = plottingDataForAllEstimates %>% group_by(feature) %>% summarise(totalHeight = sum(sqrt(abs(estimate_plus)), na.rm = TRUE))
+plottingDataForAllEstimates$totalBarHeight = 0
+
+for(i in 1:nrow(totalBarHeight)){
+  feature = totalBarHeight$feature[i];
+  plottingDataForAllEstimates$totalBarHeight[which(plottingDataForAllEstimates$feature == feature)] = totalBarHeight$totalHeight[i]
+  
+}
+
+pdf(paste0(dir,"results/estimatesForAllFeatures_",moniker,"_flippedBarPlot_plusVsMinus_standardized.pdf"), height = 50, width = 25)
+plot = ggplot(plottingDataForAllEstimates[-grep(plottingDataForAllEstimates$feature, pattern = "meta"),],
+              aes(x= fct_reorder(feature, dplyr::desc(totalBarHeight)))) +
+  geom_col(aes(y = sqrt(abs(estimate_plus)), fill = featureType_plus,alpha = ifelse(adj.pValue_plus<0.05,1,0.5)), color = "black") + 
+  geom_col(aes(y = -sqrt(abs(estimate_minus)), fill = featureType_minus, alpha = ifelse(adj.pValue_minus<0.05,1,0.5)), color = "dark red") + 
+  ggtitle("Pairwise linear regression estimates For TF-related variables - Plus vs Minus Strand") + #scale_fill_manual(values = myPalette) +
+  theme_classic2() + myPalette 
+
+print(plot)
+dev.off()
+
+
+pdf(paste0(dir,"results/estimatesForAllFeatures_",moniker,"_RadialBarPlot_plusVsMinus_standardized.pdf"), height = 25, width = 35)
+plot = ggplot(plottingDataForAllEstimates[-grep(plottingDataForAllEstimates$feature, pattern = "meta"),],
+              aes(x= reorder(feature, totalBarHeight))) +
+  geom_col(aes(y = sqrt(abs(estimate_plus)), fill = featureType_plus,alpha = ifelse(adj.pValue_plus<0.05,1,0.5)), color = "black") + 
+  geom_col(aes(y = -sqrt(abs(estimate_minus)), fill = featureType_minus, alpha = ifelse(adj.pValue_minus<0.05,1,0.5)), color = "dark red") + 
+  ggtitle("Pairwise linear regression estimates For TF-related variables - Plus vs Minus Strand") + #scale_fill_manual(values = myPalette) +
+   theme_bw() + myPalette + coord_polar()
+
+print(plot)
+dev.off()
+
+plottingData_Tf_plus = select(plottingDataForAllEstimates, feature, estimate_plus, featureType_plus, 
+                              adj.pValue_plus, significance_plus, totalBarHeight)
+colnames(plottingData_Tf_plus) = c("feature", "estimate", "featureType", "adj.pValue", "significance", "totalBarHeight_plus")
+plottingData_Tf_plus$sqrtAbsEstimate = sqrt(abs(plottingData_Tf_plus$estimate)) 
+plottingData_Tf_plus$strand = "Plus"
+
+plottingData_Tf_minus = select(plottingDataForAllEstimates, feature, estimate_minus, featureType_minus, 
+                              adj.pValue_minus, significance_minus, totalBarHeight)
+colnames(plottingData_Tf_minus) = c("feature", "estimate", "featureType", "adj.pValue", "significance", "totalBarHeight_plus")
+plottingData_Tf_minus$sqrtAbsEstimate = sqrt(abs(plottingData_Tf_minus$estimate)) 
+plottingData_Tf_minus$strand = "Minus"
+
+plottingData_Tf = rbind(plottingData_Tf_plus, plottingData_Tf_minus)
+plottingData_Tf = plottingData_Tf[-grep(plottingData_Tf$feature, pattern = "meta"),]
+plottingData_Tf$strand = factor(plottingData_Tf$strand, levels = c("Plus", "Minus"))
+
+pdf(paste0(dir,"results/estimatesForAllFeatures_",moniker,"_flippedBarPlot_facingEachOther_plusVsMinus_standardized.pdf"), height = 50, width = 25)
+
+
+plot1 = ggplot(plottingData_Tf,
+              aes(x= fct_reorder(feature, dplyr::desc(totalBarHeight_plus)))) +
+  geom_col(aes(y = sqrtAbsEstimate, fill = featureType, alpha = ifelse(adj.pValue<0.05,1,0.5)), color = "black")  + 
+  facet_grid(cols = vars(strand)) +
+  ggtitle("Pairwise logistic regression estimates For TF-related variables \nPlus vs Minus Strand") +
+  theme_bw() +
+    coord_flip() + myPalette
+
+print(plot1)
+dev.off()
+  
+
+
+
+  #heatmaps ====
+  pdf(paste0(dir,"results/estimatesForAllFeatures_",moniker,"_heatMap_PlusVsMinus_standardized.pdf"), height = 25, width = 15)
+
+plottingDataForHeatMap = plottingData[-c(1:31),]
+plottingDataForHeatMap$estimate[which(plottingDataForHeatMap$significance == "NS")] = 0
+plottingDataForHeatMap$sqrtEstimate = sqrt(abs(plottingDataForHeatMap$estimate))
+plottingDataForHeatMap = plottingDataForHeatMap[-grep(plottingDataForHeatMap$feature, pattern = "meta"),]
+plottingDataForHeatMap$feature = as.factor(plottingDataForHeatMap$feature)
+#plottingDataForHeatMap$featureType = factor(plottingDataForHeatMap$featureType, 
+#                                            levels = c("differenceOfMaxPWMScore_StrongAndWeakBindingConsidered",
+#                                                       "differenceOfMeanPWMScore_StrongAndWeakBindingConsidered",
+#                                                       "differenceOfMaxPWMScore_StrongBindingOnly",
+#                                                       "differenceOfMeanPWMScore_StrongBindingOnly",
+#                                                       "changeInNumberOfStrongTFBS"))
+
+plottingDataForHeatMap$featureType = factor(plottingDataForHeatMap$featureType, 
+                                            levels = c("differenceOfMaxPWMScore_WeakBindingOnly",
+                                                       "differenceOfMeanPWMScore_WeakBindingOnly",
+                                                       "differenceOfMaxPWMScore_StrongBindingOnly",
+                                                       "differenceOfMeanPWMScore_StrongBindingOnly",
+                                                       "changeInNumberOfStrongTFBS"))  
+
+plot_heatmap = ggplot(data = plottingDataForHeatMap,
+                       aes(x = strand,
+                           y = feature,
+                           fill = sqrtEstimate)) +
+                  geom_tile() + facet_grid(~ featureType, switch = "y", scales = "free_y", space = "free_y",   
+                                           labeller = labeller(featureType = label_wrap_gen(5))) + 
+                theme_bw() + scale_fill_viridis_c() + xlab("") + ylab ("")
+
+print(plot_heatmap)
+
+dev.off()
+
+
+  #violin plots ======
+
+pdf(paste0(dir,"results/estimatesForDifferentFeatureTypes_",moniker,"_facetByFeatureType.pdf"))
+
+plottingData$sqrtEstimate = sqrt(abs(plottingData$estimate))
+plot1 = ggviolin(filter(plottingData, !is.na(strand)),
+         x = "strand", 
+         y = "sqrtEstimate",
+         add = "boxplot",
+         color = "strand", 
+         combine = TRUE) + stat_compare_means(label.x.npc = "center", label.y.npc = "center") + #scale_color_manual(values = myPalette)  +
+  ylab("sqrt(abs(Estimate))") + coord_flip() + myPalette
+
+
+plot2 =ggviolin(filter(plottingData, !(is.na(strand))),#filter(plottingData, significance == "significant", !is.na(strand)),
+         x = "strand",
+         y = "sqrtEstimate",
+         add = "boxplot",
+         color = "strand",
+         facet.by = "featureType",
+         combine = TRUE)  + stat_compare_means(label.x.npc = "center", label.y.npc = "center")+ #scale_color_manual(values = myPalette) + 
+  ylim (0,2) + ylab("sqrt(abs(Estimate))") + coord_flip() + myPalette
+
+print(set_palette(plot1, palette = colorMap))
+print(set_palette(plot2, palette = colorMap))
+
+dev.off()
+
+
+
+  #violin plot for estimate by feature type
+pdf(paste0(dir,"results/estimatesForDifferentFeatureTypes_",moniker,"_significantVarsAt5PercentFDR_facetByStrand_standardized.pdf"))
+
+plottingData_vioPlots = filter(plottingData, !is.na(strand))
+plottingData_vioPlots$estimate = sqrt(abs(plottingData_vioPlots$estimate))
+plottingData_vioPlots$strengthOfBinding = "StrongOnly"
+#plottingData_vioPlots$strengthOfBinding[grep("WeakBinding", plottingData_vioPlots$featureType)] = "StrongAndWeak"
+plottingData_vioPlots$strengthOfBinding[grep("WeakBinding", plottingData_vioPlots$featureType)] = "WeakOnly"
+plottingData_vioPlots$featureLevel = ifelse(grepl(plottingData_vioPlots$feature, pattern = "meta"), "Meta", "Individual")
+
+plot1 = ggviolin(filter(plottingData_vioPlots, significance == "significant", featureLevel == "Individual"),
+         x = "featureType",
+         y = "estimate",
+         add = "boxplot",
+         color = "featureType",
+         combine = TRUE)  + 
+  stat_compare_means(label = "p.signif", method = "t.test", ref.group = ".all.", label.y = 0.3 , color = "maroon", size = 5) +
+  stat_compare_means(method= "anova", label.y = 0.1, label.x = 5.5, color = "darkblue") + #scale_color_manual(values = myPalette) +
+  guides(color = guide_legend(nrow = 3)) + ylab("sqrt(abs(estimate)))") + coord_flip() + myPalette
+
+plot2 = ggviolin(filter(plottingData_vioPlots, significance == "significant"),
+         x = "strengthOfBinding",
+         y = "estimate",
+         add = "boxplot",
+         color = "strengthOfBinding",
+         #facet.by = "strand",
+         combine = TRUE)  + 
+  #stat_compare_means(method = "wilcox.test", 
+  #                   comparisons = list(c("StrongAndWeak", "StrongOnly")),color = "maroon", size = 5, label.y = 0.3) +
+  stat_compare_means(method = "wilcox.test", 
+                     comparisons = list(c("WeakOnly", "StrongOnly")),color = "maroon", size = 5, label.y = 0.3) +
+  #stat_compare_means(method= "anova", label.y = 0.3, label.x = 5.5, color = "darkblue") + scale_color_manual(values = myPalette) +
+  ylab("sqrt(abs(estimate)))") + myPalette
+
+plot3 = gghistogram(plottingData_vioPlots, 
+            x = "adj.pValue",
+            y = "..density..",
+            combine = TRUE,
+            xlab = "adjusted p-value",
+            bins = 100,
+            rug = TRUE,                      # Add marginal rug
+            color = "strengthOfBinding", 
+            fill = "strengthOfBinding") + geom_vline(xintercept = 0.05)+ myPalette
+
+print(set_palette(plot1, palette = colorMap))
+print(set_palette(plot2, palette = colorMap))
+print(set_palette(plot3, palette = colorMap))
+
+dev.off()
+
+}
+
+
+#plotting 
+  
+  plotLogNet(allLogNet, moniker = "pairwiseLogRegs_WeakAndStrongBindingComputedSeparately")
+  
+  plotLMNet(allLmNet_6kVars, moniker = "pairwiseLogFCRegs_6kVars_WeakAndStrongBindingComputedSeparately")
+  plotLMNet(allLmNet_4kVars, moniker = "pairwiseLogFCRegs_4kVars_WeakAndStrongBindingComputedSeparately")
+  
+#statistics for strand-specific feature enrichment
+x = filter(plottingData, !(is.na(strand))) %>% group_by(feature, featureType, significance) %>% summarise(number = n())
+x_significantInOneStrand = filter(x, number == 1 & significance == "significant")
+x_significantInTwoStrands = filter(x, number !=1 & significance == "significant")
+length(unique(x_significantInOneStrand$feature))
+
+View(x_significantInOneStrand %>% group_by(feature) %>% summarize(number = n()))
+View(x_significantInTwoStrands %>% group_by(feature) %>% summarize(number = n()))
+
+
+```
+
+
+This chunk will define the feature subsets for building multivariate linear and logistic regression models 
+
+```{r}
+
+library(dplyr)
+library(readr)
+
+dir = "~/Desktop/3UTR/"
+
+allLogNet = read_csv(paste0(dir,"results/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"))
+
+allLmNet = read_csv(paste0(dir,"results/logFCRegressions_4kVars_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"))
+
+  #datast specific
+
+generateFormulae = function(allLogNet, moniker){
+        # make formulae for computing the models --- define variables for making the formulae
+        
+        significantVars_withMeta = allLogNet$FEATURE[which(allLogNet$adj.P.val_FeatureAndAveExprAndLibrary<0.05 & 
+                                                               !(allLogNet$FEATURE %in% c("library", "AveExpr", "logFC")))]
+        
+        allVars_withMeta = allLogNet$FEATURE[which(!(allLogNet$FEATURE %in% c("library", "AveExpr", "logFC", "causalVariant","nucleosomeScore", "populationFreq")))] #, "populationFreq", "expression", "dNdS", "dNdS_adjust", "PPI","GxGLenient", "GxGIntermediate", "GxGStrict" )))]
+
+  #myVars ----
+significantVars = significantVars_withMeta[-grep(significantVars_withMeta, pattern = "meta")]
+
+allVars = allVars_withMeta[-grep(allVars_withMeta, pattern = "meta")] #subset without meta variables
+
+metaVars = allVars_withMeta[grep(allVars_withMeta, pattern = "meta")]
+
+data_continuous = c("numberVarsInOligo", "varPosInOligo", "numberOfGenes",
+                    "delta_BP","delta_A", "delta_T", "delta_G", "delta_C", "delta_TATA", "delta_ATG",
+                    "GCContentOfOligo", "GCFoldChange",
+                    "distFromGene", "phastConScore", "MAF", "DAF")
+                  # "expression", "dNdS", "dNdS_adjust", "PPI","GxGLenient", "GxGIntermediate", "GxGStrict" )
+
+data_discrete = c("SNP","geneConflict", "essential", "isTF", "hasHumanHomolog", "hasParalog", "inANucleosome")
+
+variantConservation = c("phastConScore", "MAF", "DAF")
+physicalDistanceInGenome = "distFromGene"
+alleleSequenceDescriptors = c("SNP", "numberVarsInOligo", "varPosInOligo", "inANucleosome",
+                              "delta_BP", "delta_A", "delta_T", "delta_C", "delta_G","delta_TATA", "delta_ATG",
+                              "GCFoldChange", "GCContentOfOligo")
+geneLevelDescriptors = c("numberOfGenes", "geneConflict", "essential", "isTF", "hasHumanHomolog","hasParalog")#,"expression", 
+                         #"dNdS", "dNdS_adjust", "PPI", "GxGLenient", "GxGStrict", "GxGIntermediate")
+
+  #NonTFVars ------
+
+formula_NonTFVars = c(data_discrete, data_continuous)
+
+  #TFVars ------
+
+formula_TFVars_all = allVars[c(grep(allVars, pattern = "_Plus"), 
+                               grep(allVars, pattern = "_Minus"),
+                               grep(allVars, pattern = "Agnostic"))]
+
+formula_TFVars_plus = allVars[grep(allVars, pattern = "_Plus")]
+formula_TFVars_minus = allVars[grep(allVars, pattern = "_Minus")]
+formula_TFVars_agnostic = allVars[grep(allVars, pattern = "_Agnostic")]
+formula_TFVars_plusAndMinus = allVars[c(grep(allVars, pattern = "_Plus"), grep(allVars, pattern = "_Minus"))]
+
+  #NonTFVars + TFVars -----
+
+formula_NonTFVars_TFVars_all = c(formula_NonTFVars, formula_TFVars_all)
+formula_NonTFVars_TFVars_plus = c(formula_NonTFVars, formula_TFVars_plus)
+formula_NonTFVars_TFVars_minus = c(formula_NonTFVars, formula_TFVars_minus)
+formula_NonTFVars_TFVars_agnostic = c(formula_NonTFVars, formula_TFVars_agnostic)
+formula_NonTFVars_TFVars_plusAndMinus = c(formula_NonTFVars, formula_TFVars_plusAndMinus)
+
+  #significant associations only
+  #NonTFVars ----
+
+formula_NonTFVars_significant = significantVars[which(significantVars %in% c(data_continuous,data_discrete))]
+  
+  #TFVars ------
+formula_TFVars_significant_all = significantVars[-which(significantVars %in% c(data_continuous,data_discrete))]
+formula_TFVars_significant_plus = significantVars[grep(significantVars, pattern = "_Plus")]
+formula_TFVars_significant_minus = significantVars[grep(significantVars, pattern = "_Minus")]
+formula_TFVars_significant_agnostic = significantVars[grep(significantVars, pattern = "_Agnostic")]
+formula_TFVars_significant_plusAndMinus = significantVars[c(grep(significantVars, pattern = "_Plus"), grep(significantVars, pattern = "_Minus"))]
+
+  #NonTFVars + TFVars ------
+
+formula_NonTFVars_TFVars_significant_all = c(formula_NonTFVars_significant, formula_TFVars_significant_all)
+formula_NonTFVars_TFVars_significant_plus = c(formula_NonTFVars_significant, formula_TFVars_significant_plus)
+formula_NonTFVars_TFVars_significant_minus = c(formula_NonTFVars_significant, formula_TFVars_significant_minus)
+formula_NonTFVars_TFVars_significant_agnostic = c(formula_NonTFVars_significant, formula_TFVars_significant_agnostic)
+formula_NonTFVars_TFVars_significant_plusAndMinus = c(formula_NonTFVars_significant, formula_TFVars_significant_plusAndMinus)
+
+  #feature types
+  #all features ----
+formula_variantConservation_all = variantConservation
+
+formula_alleleSequenceDescriptors_all = alleleSequenceDescriptors
+
+formula_geneLevelDescriptors_all = geneLevelDescriptors
+  
+formula_TFDifferenceOfMaxWithoutCutOff_plus = allVars[grep(allVars, pattern = "_differenceOfMax_Plus_withoutCutOff")]
+formula_TFDifferenceOfMaxWithoutCutOff_minus = allVars[grep(allVars, pattern = "_differenceOfMax_Minus_withoutCutOff")]
+formula_TFDifferenceOfMaxWithoutCutOff_agnostic = allVars[grep(allVars, pattern = "_differenceOfMax_Agnostic_withoutCutOff")]
+formula_TFDifferenceOfMaxWithoutCutOff_plusAndMinus = allVars[c(grep(allVars, pattern = "_differenceOfMax_Plus_withoutCutOff"),
+                                                         grep(allVars, pattern = "_differenceOfMax_Minus_withoutCutOff"))]
+
+formula_TFDifferenceOfMaxWithoutCutOff_all = allVars[which(grepl(allVars, pattern = "_withoutCutOff") &
+                                                         grepl(allVars, pattern = "_differenceOfMax"))]
+
+
+
+formula_TFDifferenceOfMeansWithoutCutOff_plus = allVars[grep(allVars, pattern = "_differenceOfMeans_Plus_withoutCutOff")]
+formula_TFDifferenceOfMeansWithoutCutOff_minus = allVars[grep(allVars, pattern = "_differenceOfMeans_Minus_withoutCutOff")]
+formula_TFDifferenceOfMeansWithoutCutOff_agnostic = allVars[grep(allVars, pattern = "_differenceOfMeans_Agnostic_withoutCutOff")]
+formula_TFDifferenceOfMeansWithoutCutOff_plusAndMinus = allVars[c(grep(allVars, pattern = "_differenceOfMeans_Plus_withoutCutOff"),
+                                                         grep(allVars, pattern = "_differenceOfMeans_Minus_withoutCutOff"))]
+formula_TFDifferenceOfMeansWithoutCutOff_all = allVars[which(grepl(allVars, pattern = "_withoutCutOff") &
+                                                         grepl(allVars, pattern = "_differenceOfMeans"))]
+
+
+
+formula_TFDifferenceOfMaxWithCutOff_plus = allVars[grep(allVars, pattern = "_differenceOfMax_Plus_withCutOff")]
+formula_TFDifferenceOfMaxWithCutOff_minus = allVars[grep(allVars, pattern = "_differenceOfMax_Minus_withCutOff")]
+formula_TFDifferenceOfMaxWithCutOff_agnostic = allVars[grep(allVars, pattern = "_differenceOfMax_Agnostic_withCutOff")]
+formula_TFDifferenceOfMaxWithCutOff_plusAndMinus = allVars[c(grep(allVars, pattern = "_differenceOfMax_Plus_withCutOff"),
+                                                         grep(allVars, pattern = "_differenceOfMax_Minus_withCutOff"))]
+formula_TFDifferenceOfMaxWithCutOff_all = allVars[which(grepl(allVars, pattern = "_withCutOff") &
+                                                         grepl(allVars, pattern = "_differenceOfMax"))]
+
+
+
+formula_TFDifferenceOfMeansWithCutOff_plus = allVars[grep(allVars, pattern = "_differenceOfMeans_Plus_withCutOff")]
+formula_TFDifferenceOfMeansWithCutOff_minus = allVars[grep(allVars, pattern = "_differenceOfMeans_Minus_withCutOff")]
+formula_TFDifferenceOfMeansWithCutOff_agnostic = allVars[grep(allVars, pattern = "_differenceOfMeans_Agnostic_withCutOff")]
+formula_TFDifferenceOfMeansWithCutOff_plusAndMinus = allVars[c(grep(allVars, pattern = "_differenceOfMeans_Plus_withCutOff"),
+                                                         grep(allVars, pattern = "_differenceOfMeans_Minus_withCutOff"))]
+formula_TFDifferenceOfMeansWithCutOff_all = allVars[which(grepl(allVars, pattern = "_withCutOff") &
+                                                         grepl(allVars, pattern = "_differenceOfMeans"))]
+
+
+formula_TFDeltaSignificantBindingSites_plus = allVars[c(grep(allVars, pattern = "_deltaSignificantBindingSites_Plus_withCutOff"),
+                                                      grep(allVars, pattern = "numberOfTFBSGainOrLost_Plus_withCutOff"))]
+
+formula_TFDeltaSignificantBindingSites_minus = allVars[c(grep(allVars, pattern = "_deltaSignificantBindingSites_Minus_withCutOff"),
+                                                      grep(allVars, pattern = "numberOfTFBSGainOrLost_Minus_withCutOff"))]
+
+formula_TFDeltaSignificantBindingSites_agnostic = allVars[c(grep(allVars, pattern = "_deltaSignificantBindingSites_Agnostic_withCutOff"),
+                                                      grep(allVars, pattern = "numberOfTFBSGainOrLost_Agnostic_withCutOff"))]
+
+formula_TFDeltaSignificantBindingSites_plusAndMinus = allVars[c(grep(allVars, pattern = "_deltaSignificantBindingSites_Plus_withCutOff"),
+                                                      grep(allVars, pattern = "numberOfTFBSGainOrLost_Plus_withCutOff"),
+                                                      grep(allVars, pattern = "_deltaSignificantBindingSites_Minus_withCutOff"),
+                                                      grep(allVars, pattern = "numberOfTFBSGainOrLost_Minus_withCutOff"))]
+
+formula_TFDeltaSignificantBindingSites_all = allVars[c(grep(allVars, pattern = "_deltaSignificantBindingSites"),
+                                                      grep(allVars, pattern = "numberOfTFBSGainOrLost"))]
+
+
+
+formula_TFVarsWithoutCutOff_plus = allVars[grep(allVars, pattern = "Plus_withoutCutOff")]
+formula_TFVarsWithoutCutOff_minus = allVars[grep(allVars, pattern = "Minus_withoutCutOff")]
+formula_TFVarsWithoutCutOff_agnostic = allVars[grep(allVars, pattern = "Agnostic_withoutCutOff")]
+formula_TFVarsWithoutCutOff_plusAndMinus = allVars[c(grep(allVars, pattern = "Plus_withoutCutOff"),
+                                                   grep(allVars, pattern = "Minus_withoutCutOff"))]
+formula_TFVarsWithoutCutOff_all = allVars[grep(allVars, pattern = "_withoutCutOff")]
+
+
+formula_TFVarsWithCutOff_plus = allVars[grep(allVars, pattern = "Plus_withCutOff")]
+formula_TFVarsWithCutOff_minus = allVars[grep(allVars, pattern = "Minus_withCutOff")]
+formula_TFVarsWithCutOff_agnostic = allVars[grep(allVars, pattern = "Agnostic_withCutOff")]
+formula_TFVarsWithCutOff_plusAndMinus = allVars[c(grep(allVars, pattern = "Plus_withCutOff"),
+                                                   grep(allVars, pattern = "Minus_withCutOff"))]
+formula_TFVarsWithCutOff_all = allVars[grep(allVars, pattern = "_withCutOff")]
+
+
+  #significant associations -----
+formula_variantConservation_significant = intersect(variantConservation, significantVars)
+
+formula_alleleSequenceDescriptors_significant = intersect(alleleSequenceDescriptors, significantVars)
+
+formula_TFDifferenceOfMaxWithoutCutOff_significant_plus = significantVars[grep(significantVars, 
+                                                                                     pattern = "_differenceOfMax_Plus_withoutCutOff")]
+formula_TFDifferenceOfMaxWithoutCutOff_significant_minus = significantVars[grep(significantVars, 
+                                                                                      pattern = "_differenceOfMax_Minus_withoutCutOff")]
+                                                            
+formula_TFDifferenceOfMaxWithoutCutOff_significant_agnostic = significantVars[grep(significantVars, 
+                                                                                         pattern = "_differenceOfMax_Agnostic_withoutCutOff")]
+
+formula_TFDifferenceOfMaxWithoutCutOff_significant_plusAndMinus = significantVars[c(grep(significantVars, 
+                                                                                               pattern = "_differenceOfMax_Plus_withoutCutOff"),
+                                                         grep(significantVars, pattern = "_differenceOfMax_Minus_withoutCutOff"))]
+
+formula_TFDifferenceOfMaxWithoutCutOff_significant_all = significantVars[which(grepl(significantVars, pattern = "_withoutCutOff") &
+                                                         grepl(significantVars, pattern = "_differenceOfMax"))]
+
+
+
+formula_TFDifferenceOfMeansWithoutCutOff_significant_plus = significantVars[grep(significantVars, 
+                                                                                       pattern = "_differenceOfMeans_Plus_withoutCutOff")]
+formula_TFDifferenceOfMeansWithoutCutOff_significant_minus = significantVars[grep(significantVars, 
+                                                                                pattern = "_differenceOfMeans_Minus_withoutCutOff")]
+
+formula_TFDifferenceOfMeansWithoutCutOff_significant_agnostic = significantVars[grep(significantVars, 
+                                                                                   pattern = "_differenceOfMeans_Agnostic_withoutCutOff")]
+formula_TFDifferenceOfMeansWithoutCutOff_significant_plusAndMinus = significantVars[c(grep(significantVars, 
+                                                                                         pattern = "_differenceOfMeans_Plus_withoutCutOff"),
+                                                         grep(significantVars, pattern = "_differenceOfMeans_Minus_withoutCutOff"))]
+
+formula_TFDifferenceOfMeansWithoutCutOff_significant_all =significantVars[which(grepl(significantVars, pattern = "_withoutCutOff") &
+                                                         grepl(significantVars, pattern = "_differenceOfMeans"))]
+
+
+
+formula_TFDifferenceOfMaxWithCutOff_significant_plus = significantVars[grep(significantVars, 
+                                                                          pattern = "_differenceOfMax_Plus_withCutOff")]
+formula_TFDifferenceOfMaxWithCutOff_significant_minus = significantVars[grep(significantVars, 
+                                                                                   pattern = "_differenceOfMax_Minus_withCutOff")]
+formula_TFDifferenceOfMaxWithCutOff_significant_agnostic = significantVars[grep(significantVars, 
+                                                                                      pattern = "_differenceOfMax_Agnostic_withCutOff")]
+
+formula_TFDifferenceOfMaxWithCutOff_significant_plusAndMinus = significantVars[c(grep(significantVars, 
+                                                                                            pattern = "_differenceOfMax_Plus_withCutOff"),
+                                                         grep(significantVars, pattern = "_differenceOfMax_Minus_withCutOff"))]
+formula_TFDifferenceOfMaxWithCutOff_significant_all = significantVars[which(grepl(significantVars, pattern = "_withCutOff") &
+                                                         grepl(significantVars, pattern = "_differenceOfMax"))]
+
+
+
+formula_TFDifferenceOfMeansWithCutOff_significant_plus = significantVars[grep(significantVars, 
+                                                                                    pattern = "_differenceOfMeans_Plus_withCutOff")]
+formula_TFDifferenceOfMeansWithCutOff_significant_minus = significantVars[grep(significantVars, 
+                                                                             pattern = "_differenceOfMeans_Minus_withCutOff")]
+
+formula_TFDifferenceOfMeansWithCutOff_significant_agnostic = significantVars[grep(significantVars, 
+                                                                                pattern = "_differenceOfMeans_Agnostic_withCutOff")]
+
+formula_TFDifferenceOfMeansWithCutOff_significant_plusAndMinus = significantVars[c(grep(significantVars, 
+                                                                                      pattern = "_differenceOfMeans_Plus_withCutOff"),
+                                                         grep(significantVars, pattern = "_differenceOfMeans_Minus_withCutOff"))]
+
+formula_TFDifferenceOfMeansWithCutOff_significant_all = significantVars[which(grepl(significantVars, pattern = "_withCutOff") &
+                                                         grepl(significantVars, pattern = "_differenceOfMeans"))]
+
+
+formula_TFDeltaSignificantBindingSites_significant_plus = significantVars[c(grep(significantVars, 
+                                                                                    pattern = "_deltaSignificantBindingSites_Plus_withCutOff"),
+                                                      grep(significantVars, pattern = "numberOfTFBSGainOrLost_Plus_withCutOff"))]
+
+formula_TFDeltaSignificantBindingSites_significant_minus = significantVars[c(grep(significantVars, 
+                                                                                    pattern = "_deltaSignificantBindingSites_Minus_withCutOff"),
+                                                      grep(significantVars, pattern = "numberOfTFBSGainOrLost_Minus_withCutOff"))]
+
+formula_TFDeltaSignificantBindingSites_significant_agnostic = significantVars[c(grep(significantVars, 
+                                                                           pattern = "_deltaSignificantBindingSites_Agnostic_withCutOff"),
+                                                      grep(significantVars, pattern = "numberOfTFBSGainOrLost_Agnostic_withCutOff"))]
+
+formula_TFDeltaSignificantBindingSites_significant_plusAndMinus = significantVars[c(grep(significantVars, 
+                                                                               pattern = "_deltaSignificantBindingSites_Plus_withCutOff"),
+                                                      grep(significantVars, pattern = "numberOfTFBSGainOrLost_Plus_withCutOff"),
+                                                      grep(significantVars, pattern = "_deltaSignificantBindingSites_Minus_withCutOff"),
+                                                      grep(significantVars, pattern = "numberOfTFBSGainOrLost_Minus_withCutOff"))]
+
+formula_TFDeltaSignificantBindingSites_significant_all = significantVars[c(grep(significantVars, 
+                                                                                      pattern = "_deltaSignificantBindingSites"),
+                                                      grep(significantVars, pattern = "numberOfTFBSGainOrLost"))]
+
+
+
+formula_TFVarsWithoutCutOff_significant_plus = significantVars[grep(significantVars, pattern = "Plus_withoutCutOff")]
+formula_TFVarsWithoutCutOff_significant_minus = significantVars[grep(significantVars, pattern = "Minus_withoutCutOff")]
+formula_TFVarsWithoutCutOff_significant_agnostic = significantVars[grep(significantVars, pattern = "Agnostic_withoutCutOff")]
+formula_TFVarsWithoutCutOff_significant_plusAndMinus = significantVars[c(grep(significantVars, pattern = "Plus_withoutCutOff"),
+                                                   grep(significantVars, pattern = "Minus_withoutCutOff"))]
+formula_TFVarsWithoutCutOff_significant_all = significantVars[grep(significantVars, pattern = "_withoutCutOff")]
+
+
+formula_TFVarsWithCutOff_significant_plus = significantVars[grep(significantVars, pattern = "Plus_withCutOff")]
+formula_TFVarsWithCutOff_significant_minus = significantVars[grep(significantVars, pattern = "Minus_withCutOff")]
+formula_TFVarsWithCutOff_significant_agnostic =significantVars[grep(significantVars, pattern = "Agnostic_withCutOff")]
+formula_TFVarsWithCutOff_significant_plusAndMinus = significantVars[c(grep(significantVars, pattern = "Plus_withCutOff"),
+                                                   grep(significantVars, pattern = "Minus_withCutOff"))]
+formula_TFVarsWithCutOff_significant_all = significantVars[grep(significantVars, pattern = "_withCutOff")]
+
+
+  #meta features -----
+
+  #TFVars
+formula_metaTFVars_plus = metaVars[grep(metaVars, pattern = "Plus")]
+formula_metaTFVars_minus = metaVars[grep(metaVars, pattern = "Minus")]
+formula_metaTFVars_agnostic = metaVars[grep(metaVars, pattern = "Agnostic")]
+formula_metaTFVars_plusAndMinus = metaVars[c(grep(metaVars, pattern = "Plus"),
+                                             grep(metaVars, pattern = "Minus"))]
+formula_metaTFVars_all = metaVars
+
+  #NonTFVars + TFVars
+formula_NonTFVars_metaTFVars_all = c(formula_NonTFVars, formula_metaTFVars_all)
+formula_NonTFVars_metaTFVars_plus = c(formula_NonTFVars, formula_metaTFVars_plus)
+formula_NonTFVars_metaTFVars_minus = c(formula_NonTFVars, formula_metaTFVars_minus)
+formula_NonTFVars_metaTFVars_agnostic = c(formula_NonTFVars, formula_metaTFVars_agnostic)
+formula_NonTFVars_metaTFVars_plusAndMinus = c(formula_NonTFVars, formula_metaTFVars_plusAndMinus)
+
+    #significant associations only ---
+formula_NonTFVars_metaTFVars_significant_all = c(formula_NonTFVars_significant, formula_metaTFVars_all)
+formula_NonTFVars_metaTFVars_significant_plus = c(formula_NonTFVars_significant, formula_metaTFVars_plus)
+formula_NonTFVars_metaTFVars_significant_minus = c(formula_NonTFVars_significant, formula_metaTFVars_minus)
+formula_NonTFVars_metaTFVars_significant_agnostic = c(formula_NonTFVars_significant, formula_metaTFVars_agnostic)
+formula_NonTFVars_metaTFVars_significant_plusAndMinus = c(formula_NonTFVars_significant, formula_metaTFVars_plusAndMinus)
+
+
+  allXArguments = mget(ls()[grep(ls(), pattern = "formula_")])
+
+  return(allXArguments)
+  
+}
+
+  allXArguments_logit = generateFormulae(allLogNet, "LogReg")  
+  allXArguments_lm = generateFormulae(allLmNet, "logFCRegressions_4kVars") 
+  
+  save(allXArguments_logit,
+       allXArguments_lm,
+       file = paste0(dir, "data/formulaeForModelBuilding_new.rda"))
+
+  
+```
+
+This chunk will compute logistic and linear regressions with the sets defined in previous chunk and plot results
+
+```{r}
+
+library(caret)
+library(pROC)
+library(dplyr)
+library(ggpubr)
+library(Metrics)
+library(reshape2)
+  
+  #load formule and datasets required for running your training. 
+dir = "~/Desktop/3UTR/"
+
+load(paste0(dir, "data/AllVarsData_6kVars_WeakAndStrongBindingComputedSeparately.rda"))
+load(paste0(dir, "data/formulaeForModelBuilding_new.rda")) #formulae for regressions
+
+popFrequencyNARows = which(is.na(allData_4kVars_std$DAF)) #popFreq replaced by DAF
+allData_popFreqReduced = allData_4kVars[-popFrequencyNARows,]
+allData_popFreqReduced_std = allData_4kVars_std[-popFrequencyNARows,]
+
+allData_popFreqReduced = select(allData_popFreqReduced, -expression, -contains("GxG"), -contains("dNdS"), -PPI, -nucleosomeScore)
+allData_popFreqReduced_std = select(allData_popFreqReduced_std, -expression, -contains("GxG"), -contains("dNdS"), -PPI, -nucleosomeScore)
+
+  #save the popFrequency data for Carl's model ------
+variantIDTestName_popFrequencyReduced = variantIDTestName_all[!(is.na(variantIDTestName_all$causalVariant)),]
+variantIDTestName_popFrequencyReduced = variantIDTestName_popFrequencyReduced[-popFrequencyNARows,]
+
+  save(allData_popFreqReduced,
+       allData_popFreqReduced_std,
+       variantIDTestName_popFrequencyReduced,
+       file = paste0(dir, "data/allVarsData_popFrequencyReduced.rda"))
+
+  #MODEL TRAINING/FITTING BEGINS -----
+####### Linear models - regularized and unregularized -----
+set.seed(7890)
+trainingRows_lm = createDataPartition(allData_popFreqReduced_std$logFC,list = FALSE, p = 0.9)
+
+trainingSet = allData_popFreqReduced_std[trainingRows_lm,]
+  testSet = allData_popFreqReduced_std[-trainingRows_lm,]
+
+set.seed(1234)
+
+ myTrControl=trainControl(
+    method = "repeatedcv",
+    number=10,
+    repeats = 5)
+
+trainLmModels = function(x,name){
+  print(name)
+  #causalRows = which(testSet$causalVariant == TRUE)
+  
+  model_lm = train(logFC~., 
+                   data = dplyr:: select(trainingSet, x, logFC),
+                   method = "lm",
+                   #tuneGrid = expand.grid(C = seq(0, 2, length = 5)),
+                   metric = "RMSE",
+                   trControl = myTrControl,
+                   na.action = na.exclude)
+  
+  rmse_all = model_lm$resample$RMSE
+  
+  preds = predict(model_lm, newdata= select(testSet, x))
+
+  corFoldid_all = cor.test(preds, testSet$logFC, method = "spearman")
+  #corFoldid_causal = cor.test(preds[causalRows], testSet$logFC[causalRows], method = "spearman")
+
+  return(c(rmse_all, corFoldid_all$estimate, corFoldid_all$p.value, list(preds)))}
+
+trainLmModels_elnet = function(x,name){
+  print(name)
+  #causalRows = which(testSet$causalVariant == TRUE)
+  
+  model_lm = train(logFC~., 
+                   data = dplyr:: select(trainingSet, x, logFC),
+                   method = "glmnet",
+                    tuneLength = 5 ,
+                   metric = "RMSE",
+                   trControl = myTrControl,
+                   na.action = na.exclude)
+  
+  rmse_all = model_lm$resample$RMSE
+  #if(length(rmse_all) != 50){
+  #  rmse_all = rep(NA, 50)
+  #}
+  
+  preds = predict(model_lm, newdata= select(testSet, x))
+
+  corFoldid_all = cor.test(preds, testSet$logFC, method = "spearman")
+  #corFoldid_causal = cor.test(preds[causalRows], testSet$logFC[causalRows], method = "spearman")
+
+  return(c(rmse_all, corFoldid_all$estimate, corFoldid_all$p.value,
+           list(preds),
+           model_lm$bestTune[1,"alpha"], model_lm$bestTune[1, "lambda"]))}
+
+linearModels = parallel::mcmapply(FUN = trainLmModels, allXArguments_lm, names(allXArguments_lm), mc.cores = parallel::detectCores() )
+
+linearModels_elnet = parallel::mcmapply(FUN = trainLmModels_elnet, allXArguments_lm, names(allXArguments_lm), mc.cores = parallel::detectCores() )
+
+
+####### compute model fit ####
+#R2
+computeR2 = function(x){
+            print(names(x))
+            lmModel = lm(logFC~., data = dplyr::select(allData_popFreqReduced_std, x, logFC))
+            lmModel_summary = summary(lmModel)
+            p = pf(lmModel_summary$fstatistic[1], lmModel_summary$fstatistic[2],lmModel_summary$fstatistic[3],lower.tail=FALSE)
+            return(c(r2_adj = lmModel_summary$adj.r.squared, p = p))
+          }
+
+
+    R2_allModels = parallel::mclapply(allXArguments_lm, computeR2, mc.cores = parallel::detectCores())
+    
+####### logistic regression models #####
+
+set.seed(7988)
+trainingRows_logit =  createDataPartition(allData_popFreqReduced$causalVariant, list = FALSE, p = 0.9)
+
+trainingSet_logit = allData_popFreqReduced[trainingRows_logit,]
+testSet_logit = allData_popFreqReduced[-trainingRows_logit,]
+
+set.seed(123)
+trControl_logit = trainControl(
+    method = "repeatedcv",
+    number=10,
+    repeats = 5)
+  
+trainLogitCVs = function(x,name){
+  
+  print(name)
+  
+  model_logit = train(causalVariant~., 
+                   data = dplyr:: select(trainingSet_logit, x, causalVariant),
+                   method = "glm",
+                   family = binomial(),
+                   metric = "Kappa",
+                   trControl = trControl_logit,
+                   na.action = na.exclude)
+  
+  kappa_all = model_logit$resample$Kappa 
+  
+  prediction_logitModel = predict(model_logit, newdata = select(testSet_logit, x), type = "prob")
+  preds = prediction_logitModel$`TRUE`
+  preds = factor(preds, ordered = TRUE)
+  plottingROC = data.frame(causalVariant = testSet_logit$causalVariant, preds = preds)
+  auc = roc(plottingROC$causalVariant~plottingROC$preds)$auc
+  return(c(kappa_all,auc, list(prediction_logitModel$`TRUE`)))}
+
+trainLogitCVs_elnet = function(x,name){
+  
+  print(name)
+  
+  model_logit = train(causalVariant~., 
+                      data = dplyr:: select(trainingSet_logit, x, causalVariant),
+                      method = "glmnet",
+                      family = "binomial",
+                      metric = "Kappa",
+                      trControl = trControl_logit,
+                      na.action = na.exclude,
+                      tuneGrid = myTuneGrid)
+  
+  kappa_all = model_logit$resample$Kappa 
+  
+  prediction_logitModel = predict(model_logit, newdata = select(testSet_logit, x), type = "prob")
+  preds = prediction_logitModel$`TRUE`
+  preds = factor(preds, ordered = TRUE)
+  plottingROC = data.frame(causalVariant = testSet_logit$causalVariant, preds = preds)
+  auc = roc(plottingROC$causalVariant~plottingROC$preds)$auc
+  return(c(kappa_all,auc, list(prediction_logitModel$`TRUE`),
+           model_logit$bestTune[1,"alpha"], model_logit$bestTune[1, "lambda"]))}
+
+logitModels = parallel::mcmapply(FUN = trainLogitCVs, allXArguments_logit, names(allXArguments_logit), mc.cores = parallel::detectCores())
+
+logitModels_elnet = parallel::mcmapply(FUN = trainLogitCVs_elnet, allXArguments_logit, names(allXArguments_logit), mc.cores = parallel::detectCores())
+
+  #PLOTTING MODELS --------
+###### plotting the best linear model result #####
+linearModels = as.data.frame(t(linearModels))
+models = row.names(linearModels)
+models = stringr::str_remove_all(models, "formula_")
+
+R2ForAllModels = as.data.frame(t(as.data.frame(R2_allModels)))
+R2ForAllModels$model = row.names(R2ForAllModels)
+R2ForAllModels$model = stringr::str_remove_all(R2ForAllModels$model, "formula_")
+
+colnames(linearModels) = c(paste0("RMSE", c(1:50)), "rho", "pValue", "preds")#, "bestAlpha", "bestLambda")
+linearModels$model= models
+
+RMSE_linearModels = select(linearModels, contains("RMSE"))
+RMSE_linearModels = as.data.frame(apply(RMSE_linearModels, 2, FUN = as.numeric))
+RMSE_linearModels$model = models
+
+
+molten = melt(RMSE_linearModels, id.vars = "model")
+
+meanRMSE = molten %>% group_by(model) %>% summarise(meanRMSE = mean(value))
+
+testPreds = select(linearModels, rho, pValue, preds, model)
+testPreds$rho = unlist(testPreds$rho)
+testPreds$pValue = unlist(testPreds$pValue)
+testPreds$meanRMSE = meanRMSE$meanRMSE
+testPreds = cbind(testPreds, R2ForAllModels[,c("r2_adj", "p.value")])
+
+molten[, c("meanRMSE", "rho", "pValue", "R2", "R2_pValue")] = 0
+
+for(i in 1:nrow(testPreds)){
+  model = testPreds$model[i]
+  modelRows = which(molten$model == model)
+  molten[modelRows, c("rho", "pValue")] = testPreds[i, c("rho", "pValue")]
+  
+  R2Rows = which(R2ForAllModels$model == model)
+  R2_thisModel = R2ForAllModels[R2Rows, c("r2_adj", "p.value")]
+  molten[modelRows, c("r2_adj", "R2_pValue")] = R2_thisModel
+  
+  meanRMSERows = which(meanRMSE$model == model)
+  molten[modelRows, "meanRMSE"] = meanRMSE[meanRMSERows, "meanRMSE"]
+}
+
+molten$preds_significance = ifelse(molten$pValue < 0.05, "significant", "NS")
+
+molten$rho_sigCorrected = molten$rho
+molten$rho_sigCorrected[which(molten$pValue > 0.05)] = NA
+
+  #plot scatter plot of the best model
+model_maxRhoOnTest = which(testPreds$rho == max(testPreds$rho))
+
+preds_bestModel_maxRhoOnTest = data.frame(preds = unlist(testPreds$preds[model_maxRhoOnTest]),
+                            actual = testSet$logFC,
+                            causal = as.character(testSet$causalVariant))
+
+pdf(paste0(dir, "results/bestModelScatter_maRhoOnTest_allVars_lmUnregularized.pdf"))
+ggscatter(data = preds_bestModel_maxRhoOnTest,
+          x = "actual",
+          y = "preds",
+          add = "reg.line",
+          conf.int = TRUE,
+          add.params = list(color = "deeppink",
+                            fill = "lightblue"),
+          shape = 1,
+          alpha = 0.5,
+          title = "Best Linear Model (all-vars) \n max rho on testSet") + stat_cor(method = "spearman") + xlim(0,1) + ylim(0,0.5)
+
+dev.off()
+
+  ###elnet
+linearModels_elNet = as.data.frame(t(as.data.frame(linearModels_elnet)))
+linearModels_elNet$model = models
+colnames(linearModels_elNet) = c(paste0("RMSE", c(1:50)), "rho", "pValue", "preds", "bestTune_alpha", "bestTune_lambda", "model") 
+
+linearModels_elNet_RMSE = select(linearModels_elNet, contains("RMSE"))
+linearModels_elNet_RMSE = as.data.frame(apply(linearModels_elNet_RMSE, 2, as.numeric))
+
+testPreds_elNet = select(linearModels_elNet, "rho", "pValue", "bestTune_alpha", "bestTune_lambda")
+testPreds_elNet =  as.data.frame(apply(testPreds_elNet, 2, as.numeric))
+testPreds_elNet$preds = linearModels_elNet$preds
+testPreds_elNet$model = linearModels_elNet$model
+testPreds_elNet$meanRMSE = apply(linearModels_elNet_RMSE, 1, mean)
+
+
+###### plotting the best logistic regression model ########
+
+logitModels = as.data.frame(t(as.data.frame(logitModels)))
+colnames(logitModels) = c(paste0("Kappa", seq(1:50)), "AUC", "preds")
+
+models= stringr::str_remove_all(row.names(logitModels), "formula_")
+logitModels$model = models
+
+logitModels_trainingKappa = select(logitModels, contains("Kappa"), model)
+logitModels_trainingKappa[,1:50] = as.data.frame(apply(logitModels_trainingKappa[,1:50],2,FUN = as.numeric))
+logitModels_trainingKappa$meanKappa = apply(logitModels_trainingKappa[,1:50],1, mean)
+
+testPreds_logitModels = select(logitModels, AUC, preds, model)
+testPreds_logitModels$AUC = as.numeric(testPreds_logitModels$AUC)
+testPreds_logitModels$meanKappa = logitModels_trainingKappa$meanKappa
+
+bestAUC = which(testPreds_logitModels$AUC == max(testPreds_logitModels$AUC))
+bestModelName = testPreds_logitModels$model[bestAUC]
+preds_best= unlist(testPreds_logitModels$preds[bestAUC])
+preds_best = factor(preds_best, ordered = TRUE)
+
+plottingROC = data.frame(causalVariant = testSet_logit$causalVariant, preds = preds_best)
+
+pdf(paste0(dir, "results/bestClassifier_AUCCurve.pdf"))
+roc_curve = smooth(roc(plottingROC$causalVariant~plottingROC$preds, plot = TRUE, print.auc = TRUE))
+dev.off()
+  
+
+  ##elnet
+  #some elnet models threw an error. Hence, make those entries list of NAs
+NAList = as.list(rep(NA, 54))
+logitModels_elnet[[28]] = NAList
+logitModels_elnet[[56]] = NAList
+logitModels_elnet[[84]] = NAList
+logitModels_elnet[[112]] = NAList
+
+  #process to compare results
+logitModels_elNet = as.data.frame(do.call(rbind, logitModels_elnet))
+models = stringr::str_remove(row.names(logitModels_elNet), pattern = "formula_")
+logitModels_elNet$model = models
+colnames(logitModels_elNet) = c(paste0("RMSE", c(1:50)), "AUC", "preds", "alpha", "lambda", "model") 
+
+logitModels_elNet_RMSE = dplyr::select(logitModels_elNet, contains("RMSE"))
+logitModels_elNet_RMSE = as.data.frame(apply(logitModels_elNet_RMSE, 2, as.numeric))
+
+testPreds_logitModels_elNet = dplyr::select(logitModels_elNet, "AUC", "alpha", "lambda")
+testPreds_logitModels_elNet =  as.data.frame(apply(testPreds_logitModels_elNet, 2, as.numeric))
+testPreds_logitModels_elNet$preds = logitModels_elNet$preds
+testPreds_logitModels_elNet$model = logitModels_elNet$model
+testPreds_logitModels_elNet$meanRMSE = apply(logitModels_elNet_RMSE, 1, mean)
+
+###### consolidating all model training results for supplementary table and plotting figure 6A ------
+  suppTable_multiVariateTrainingModels = data.frame(model = testPreds$model, rho_lmUnregularized = testPreds$rho, 
+                            p_lmUnregularized = testPreds$pValue, 
+                            meanTrainingRMSE_lmUnregularized = testPreds$meanRMSE)
+  
+  for(i in 1:nrow(suppTable_multiVariateTrainingModels)){
+    model = suppTable_multiVariateTrainingModels$model[i]
+    rowInR2ForAllModels = which(R2ForAllModels$model == model)
+    rowInAUC = which(testPreds_logitModels$model == model)
+    rowInElNet = which(testPreds_elNet$model == model)
+    
+    suppTable_multiVariateTrainingModels$rho_lmRegularized[i] = testPreds_elNet$rho[rowInElNet]
+    suppTable_multiVariateTrainingModels$p_lmRegularized[i] = testPreds_elNet$pValue[rowInElNet]
+    suppTable_multiVariateTrainingModels$bestLambda_lmRegularized[i] = testPreds_elNet$bestTune_lambda[rowInElNet]
+    suppTable_multiVariateTrainingModels$bestAlpha_lmRegularized[i] = testPreds_elNet$bestTune_alpha[rowInElNet]
+    suppTable_multiVariateTrainingModels$meanTrainingRMSE_lmRegularized[i] = testPreds_elNet$meanRMSE[rowInElNet]
+    
+    suppTable_multiVariateTrainingModels$r2_lmFit[i] = R2ForAllModels$r2_adj[rowInR2ForAllModels]
+    suppTable_multiVariateTrainingModels$p_lmFit[i] = R2ForAllModels$p.value[rowInR2ForAllModels]
+    
+    suppTable_multiVariateTrainingModels$AUC[i] = testPreds_logitModels$AUC[rowInAUC]
+    suppTable_multiVariateTrainingModels$meanTrainingKappa[i] = testPreds_logitModels$meanKappa[rowInAUC]
+  
+  }
+  
+    #save data for supplementary table before making other changes required for plotting figure 6A.
+  write.csv(suppTable_multiVariateTrainingModels, 
+            file = paste0(dir, "results/suppTable_multiVariateTrainingModels.csv"),
+            quote = FALSE,
+            row.names = FALSE)
+  
+  
+    #plotting figure 6A
+  plottingFig6 = suppTable_multiVariateTrainingModels
+  plottingFig6$AUC = plottingFig6$AUC - 0.5 # substract 0.5 for sake of plotting aesthetic
+  
+  plottingFig6$AUC = ifelse(plottingFig6$AUC < 0, NA, plottingFig6$AUC) #show only AUCs > 0.5 on figure
+  plottingFig6$rho_lmUnregularized = ifelse(plottingFig6$rho_lmUnregularized < 0, NA,
+                                            plottingFig6$rho_lmUnregularized) #show only significant rhos on figure
+  plottingFig6$r2_lmFit = ifelse(plottingFig6$r2_lmFit < 0, NA, plottingFig6$r2_lmFit) #show only significant fits on figure
+  
+  
+  plottingFig6$significance_lmFit = ifelse(plottingFig6$p_lmFit < 0.05, "significant", "NS")
+  plottingFig6$significance_lmUnregularized = ifelse(plottingFig6$p_lmUnregularized < 0.05, "significant", "NS")
+  
+  
+  pdf(paste0(dir, "results/fig6.pdf"), 
+              width = 10, height = 15)
+  fig6 = ggplot(data = plottingFig6, aes(x = reorder(model,r2_lmFit,.desc = TRUE))) +
+          geom_col(aes(y = rho_lmUnregularized,alpha = significance_lmUnregularized), 
+                   fill = "deeppink", color = "black") +
+           geom_point(aes(y = r2_lmFit, shape = significance_lmFit), size = 2, color = "darkblue") +
+            geom_col(aes(y = -AUC), color = "black", color = "gray") +
+            coord_flip() + theme_bw() 
+  plot(fig6)
+  
+  dev.off()
+  
+```
+
+
+This chunk will make the supplementary tables for the paper.
+  This chunk will:
+  1.The code uses the nomenclature withoutCutOff and withCutOff instead of belowCutOff and aboveCutOff for the strong and weak binding TF features.
+  2.Remove unnecessary rows in the univariate results like logFC, causalVariant etc. 
+  3. Format the data into different excel sheets. 
+
+```{r}
+library(stringr)
+library(readr)
+library(dplyr)
+library(openxlsx)
+
+dir =  "~/Desktop/3UTR/"
+
+  #load tables for nomenclature correction
+univariateLogitResults = read_csv(paste0(dir,"results/SignificantVsNonSignficantVarsComparison_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"))
+
+univariateLmResults_4kVars = read_csv(paste0(dir,"results/logFCRegressions_4kVars_checkingLibraryInteraction_AllStrandConformations_ScerTF_standardize_new.csv"))
+
+multivariateModelResults = read_csv(paste0(dir,"results/suppTable_multiVariateTrainingModels.csv"))
+
+  #function to correct with and without cutoff to above and below cutoff
+correctNomenclature = function(featureColumn){
+  featureColumn = str_replace(featureColumn, pattern = regex("WithoutCutOff", ignore_case = TRUE),
+                              replacement = "BelowCutOff")
+  featureColumn = str_replace(featureColumn, pattern = regex("WithCutOff", ignore_case = TRUE), 
+                              replacement = "AboveCutOff")
+  return(featureColumn)
+}
+
+  #correct nomenclature: with/without cutoff --> above/below cutoff
+univariateLogitResults$FEATURE = correctNomenclature(univariateLogitResults$FEATURE)
+univariateLmResults_4kVars$FEATURE = correctNomenclature(univariateLmResults_4kVars$FEATURE)
+multiVariateModelResults$model = correctNomenclature(multiVariateModelResults$model)
+
+  #remove unnecessary rows in the univariate result table
+featuresToRemove = c("causalVariant", "logFC", "AveExpr", "RMDerived")
+
+univariateLogitResults = univariateLogitResults[-which(univariateLogitResults$FEATURE %in% featuresToRemove),]
+univariateLmResults_4kVars = univariateLmResults_4kVars[-which(univariateLmResults_4kVars$FEATURE %in% featuresToRemove),]
+
+  #split the multivariateModels into two tables for two sheets
+multivariateLogitModelResults = select(multiVariateModelResults, model, AUC, meanTrainingKappa) #logistic models
+multivariateLmModelResults = select(multiVariateModelResults, -AUC, -meanTrainingKappa) #linear models and fit
+
+  #save as excel files
+#UNIVARIATE REGRESSIONS
+suppTable_univariate = createWorkbook()
+addWorksheet(suppTable_univariate, "logisticRegressions")
+addWorksheet(suppTable_univariate, "linearRegressions")
+
+writeData(suppTable_univariate, 
+          sheet = "logisticRegressions",
+          x = univariateLogitResults,
+          rowNames = FALSE,
+          keepNA = TRUE,
+          na.string = "NA"
+          )
+
+writeData(suppTable_univariate,
+          sheet = "linearRegressions",
+          x = univariateLmResults_4kVars,
+          rowNames = FALSE,
+          keepNA = TRUE,
+          na.string = "NA")
+
+saveWorkbook(suppTable_univariate, file = paste0(dir, "results/suppTable_univariateRegressions.xlsx"), overwrite = TRUE)
+
+#MULTIVARIATE REGRESSIONS 
+suppTable_multivariate = createWorkbook()
+addWorksheet(suppTable_multivariate, "logisticRegressionModel")
+addWorksheet(suppTable_multivariate, "linearRegressionModels")
+
+writeData(suppTable_multivariate, 
+          sheet = "logisticRegressionModel",
+          x = multivariateLogitModelResults,
+          rowNames = FALSE,
+          keepNA = TRUE,
+          na.string = "NA")
+
+writeData(suppTable_multivariate,
+          sheet = "linearRegressionModels",
+          x = multivariateLmModelResults,
+          rowNames = FALSE,keepNA = TRUE,
+          na.string = "NA")
+
+saveWorkbook(suppTable_multivariate, file = paste0(dir, "results/suppTable_multiVariateRegressions.xlsx"), overwrite = TRUE)
+
+```
+
+#For code in deBoer et al. 2019
+
+1. Variant centered data generation
+
+```{r}
+library(Biostrings)
+library(stringi)
+library(stringr)
+
+dir = "~/Desktop/3UTR/"
+#load required datasets
+load(paste0(dir, "data/allVarsData_popFrequencyReduced.rda"))  # promoter data
+load(paste0(dir, "data/R_oligoDesign_TSS_UpStream_190924.RData")) #oligo design
+
+#define testName variable in oligo design table 
+oligoDesign$testName = paste(oligoDesign$oligoBlock, oligoDesign$alleleString, sep = "_")
+oligoDesign_unique = oligoDesign[!duplicated(oligoDesign$testName),]
+
+#sequences - the different sequences in the oligoDesign table are such that when you reverse complement them, you have the 8bp of AscI site in the 3'end. 
+## You have to paste together sequences in the following order: 
+    ### Plasmid sequence - PS1 - SfiI-A site - reverseComplement of sequence in oligoDesign table - yeGFP (for TSS library)
+    ### Plasmid sequence - PS1 - SfiI-A site - reverseCOmplement of sequence in oligoDesign table - His3 prmoter fragment - yeGFP (Upstream)
+
+  #Define constant sequences -----
+  plasmidUpstream = "GAAGAACAGTATTTGGTATCTGCGCTCTGCTGAAGCCAGTTACCTCGGAAAAAGAGTTGGTAGCTCTTGATCCGGCAAACAAACCACCGCTGGTAGCGGTGGTTTTTTTGTTTGCAAGCAGCAGATTACGCGCAGAAAAAAAGGATCTCAAGAAGATCCTTTGATTTTCTACCGAAGAAAGGCCCACCCGTGAAGGTGAGCCAGTGAGTTGATTGCAGTCCAGTTACGCTGGAGTCAAGCGCGGCCGCGG"
+  
+  PS1 = "CGGTCTCGGCATTCCTGCTGAACCGCTCTTCCGATCT"
+  SfiI = "GGCCATTACGGCC"
+  
+  His3p = "ATTGGCATTATCACATAATGAATTATACATTATATAAAGTAATGTGATTTCTTCGAAGAATATACTAAAAAATGAGCAGGCAAGATAAACGAAGGCAAAG"
+  
+  yeGFP = "ATGTCTAAAGGTGAAGAATTATTCACTGGTGTTGTCCCAATTTTGGTTGAATTAGATGGTGATGTTAATGGTCACAAATTTTCTGTCTCCGGTGAAGGTGAAGGTGATGCTACTTACGGTAAATTGACCTTAAAATTTATTTGTACTACTGGTAAATTGCCAGTTCCATGGCCAACCTTAGTCACTACTTTAACTTATGGTGTTCAATGTTTTTCTAGATACCCAGATCATATGAAACAACATGACTTTTTCAAGTCTGCCATGCCAGAAGGTTATGTTCAAGAAAGAACTATTTTTTTCAAAGATGACGGTAACTACAAGACCAGAGCTGAAGTCAAGTTTGAAGGTGATACCTTAGTTAATAGAATCGAATTAAAAGGTATTGATTTTAAAGAAGATGGTAACATTTTAGGTCACAAATTGGAATACAACTATAACTCTCACAATGTTTACATCATGGCTGACAAACAAAAGAATGGTATCAAAGTTAACTTCAAAATTAGACACAACATTGAAGATGGTTCTGTTCAATTAGCTGACCATTATCAACAAAATACTCCAATTGGTGATGGTCCAGTCTTGTTACCAGACAACCATTACTTATCCACTCAATCTGCCTTATCCAAAGATCCAAACGAAAAGAGAGACCACATGGTCTTGTTAGAATTTGTTACTGCTGCTGGTATTACCCATGGTATGGATGAATTGTACAAATAA"
+  
+  upstreamSequence = paste0(plasmidUpstream, PS1, SfiI) #Upstream Bit
+  
+  
+  #extract variant info
+  variantsDF <- data.frame(t(sapply(variantIDTestName_popFrequencyReduced$variantID, function(x){strsplit(x, "_")[[1]]})), stringsAsFactors=FALSE)
+  colnames(variantsDF) <- c("chr", "pos", "ref", "alt", "strand")
+  variantsDF$SNP <- nchar(variantsDF[,3]) == 1 & nchar(variantsDF[,4]) == 1
+  # in cases with commas in the alt allele, we only made the first
+  variantsDF$alt[str_detect(variantsDF$alt, ",")] <- sapply(variantsDF$alt[str_detect(variantsDF$alt, ",")], function(x){str_split(x, ",")[[1]][1]})
+  
+  #get the flanking sequences for each variant - 55bp upstream and 54bp downstream and the variant at the center. (total 110bp for deBoer et al. (2019) program)
+  
+  sink(paste0(dir, "CarlModel/CisRegModel/myStuff/inputData/promoterOligoSeq_variantCentered110bp.txt")) 
+  
+  variantIDTestName_popFrequencyReduced$varPosInOligo = allData_popFreqReduced$varPosInOligo
+  
+  for(thisVariant in 1:nrow(variantIDTestName_popFrequencyReduced)){
+    #sequence
+    testName = variantIDTestName_popFrequencyReduced$testName[thisVariant]
+    variantID = variantIDTestName_popFrequencyReduced$variantID[thisVariant]
+    varPos = variantIDTestName_popFrequencyReduced$varPosInOligo[thisVariant]
+    
+    rowInOligoDesign = which(oligoDesign_unique$testName == testName)
+    altSequence = oligoDesign_unique$sequence[rowInOligoDesign]
+    oligoBlockForTestName = oligoDesign_unique$oligoBlock[rowInOligoDesign]
+    alleleStringForTestName = oligoDesign_unique$alleleString[rowInOligoDesign]
+    refAlleleString = paste(replicate(nchar(alleleStringForTestName), expr = 1), collapse = "")
+    refTestName = paste(oligoBlockForTestName, refAlleleString, sep = "_")
+    refSequence = oligoDesign_unique$sequence[which(oligoDesign_unique$testName == refTestName)]
+    
+    refSequence = as.character(reverseComplement(DNAString(refSequence)))
+    altSequence = as.character(reverseComplement(DNAString(altSequence)))
+    
+    refSequence_fullLength = paste0(upstreamSequence, refSequence, yeGFP)
+    altSequence_fullLength = paste0(upstreamSequence, altSequence, yeGFP)
+    
+    
+    varPosition = as.numeric(variantIDTestName_popFrequencyReduced$varPosInOligo[thisVariant])
+    varPosition_fullLength = nchar(upstreamSequence) + varPosition
+    
+    leftStart = varPosition_fullLength - 55
+    rightEnd = varPosition_fullLength + 54
+    
+    refSubSeq = substring(refSequence_fullLength, first = leftStart, last = rightEnd)
+    altSubSeq = substring(altSequence_fullLength, first = leftStart, last = rightEnd)
+    
+    variantIdentifier_refSeq = paste(thisVariant, 1, sep = ".")
+    variantIdentifier_altSeq = paste(thisVariant, 2, sep = ".")
+    
+    cat( refSubSeq, "\t", variantIdentifier_refSeq, "\n", 
+         altSubSeq, "\t", variantIdentifier_altSeq, "\n")
+    
+  }
+  
+  closeAllConnections()
+```
+
+Run on Shell
+
+cd ~/Desktop/3UTR/CarlModel/CisRegModel
+
+./seqsToOHC.py -i myStuff/inputData/promoterOligoSeq_variantCentered110bp.txt -m 110 -o myStuff/OHEData/promoterOligoSeq_OHC_variantCentered110bp.txt
+
+./predictThermodynamicEnhancosomeModel.py -i ./myStuff/OHEData/promoterOligoSeq_OHC_variantCentered110bp.txt -o ./myStuff/outputPreds/promoterOligoSeq_preds_variantCentered110bp.gz -v -v -v -M ./MyStuff/EBound2_progressive_learning_pTpA_Glu.ACPMB.Model -sl 110 -b 256 -t 2 -VARIABLE
+
+This chunk will analyse the predictions from deBoer et al.'s code and plot figure 6B and 6C
+```{r}
+
+library(readr)
+library(dplyr)
+library(ggpubr)
+
+dir = "~/Desktop/3UTR/" #set directory to the folder downloaded from Github
+
+preds_variantCentered110bp = read_delim(paste0(dir,"CarlModel/CisRegModel/myStuff/outputPreds/promoterOligoSeq_preds_variantCentered110bp.gz"), "\t", escape_double = FALSE, trim_ws = TRUE)
+
+load(paste0(dir, "data/allVarsData_popFrequencyReduced.rda")) # promoter data
+
+load(paste0(dir, "PromoterDataWithNewTFScores_MinusStrand_ScerTF.RData")) # promoter data
+
+logFC = otherInfo$logFC[which(otherInfo$variantID %in% variantIDTestName_popFrequencyReduced$variantID)]
+allData_popFreqReduced$logFC = logFC
+
+predOutput = function(preds, cutScheme){
+  preds_CarlModel = preds
+  preds_CarlModel$VariantRow = floor(preds_CarlModel$actual)
+  preds_CarlModel$allele = 10*(preds_CarlModel$actual - preds_CarlModel$VariantRow)
+  
+  preds_CarlModel_logFC = as.data.frame(unique(preds_CarlModel$VariantRow))
+  preds_CarlModel_logFC$actual = allData_popFreqReduced$logFC
+  preds_CarlModel_logFC$causalVariant = allData_popFreqReduced$causalVariant
+  preds_CarlModel_logFC$predicted = 0
+  
+  for(thisVariantRow in 1:nrow(preds_CarlModel_logFC)){
+    predsForThisVariant = filter(preds_CarlModel, VariantRow == thisVariantRow)
+    predictedExpression_ref = predsForThisVariant$predicted[1]
+    predictedExpression_alt = predsForThisVariant$predicted[2]
+    
+    predicted_logFC = log2(predictedExpression_alt/predictedExpression_ref)
+    preds_CarlModel_logFC$predicted[thisVariantRow] = predicted_logFC
+  }
+  
+   preds_CarlModel_AbslogFC = preds_CarlModel_logFC 
+  preds_CarlModel_AbslogFC$actual = abs(preds_CarlModel_AbslogFC$actual)
+  preds_CarlModel_AbslogFC$predicted = abs(preds_CarlModel_AbslogFC$predicted)
+  
+  
+  #compute correlations - actual vs predicted logFC -------
+  #all data
+  cor_allData = cor.test(preds_CarlModel_logFC$predicted, preds_CarlModel_logFC$actual, method = "spearman")
+  
+  cor_allData_Abs = cor.test(preds_CarlModel_AbslogFC$predicted, preds_CarlModel_AbslogFC$actual, method = "spearman")
+  
+  legendEstimate_all = paste("rho", round(cor_allData$estimate,2), sep = " - ")
+  legendPValue_all = paste("pValue", round(cor_allData$p.value,3), sep = " - ")
+  
+  
+  #significant logFC only
+  significantRows = which(as.character(allData_popFreqReduced$causalVariant) == TRUE)
+  cor_significantData = cor.test(preds_CarlModel_logFC$predicted[significantRows], preds_CarlModel_logFC$actual[significantRows], method = "spearman")
+  
+  cor_significantData_Abs = cor.test(preds_CarlModel_AbslogFC$predicted[significantRows], preds_CarlModel_AbslogFC$actual[significantRows], method = "spearman")
+  
+  
+  legendEstimate_significantRows = paste("rho", round(cor_significantData$estimate,2), sep = " - ")
+  legendPValue_significantRows = paste("pValue", round(cor_significantData$p.value,3), sep = " - ")
+  
+  pdf(paste0(dir, "results/predictedVsActual_CarlModel_logFC_variantCentered110bp_popFrequencyReduced.pdf"))
+  
+  allVars = ggplot(preds_CarlModel_logFC, aes(x = actual, y = predicted)) +
+           geom_bin2d(bins = 100) +
+            scale_fill_continuous(type = "viridis") +
+            theme_bw()+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0)) + stat_cor(method = "spearman", label.x = 2, label.sep = "\n") +
+          ggtitle(label = "Predicted vs Actual \nVariant effects \n (all variants)")
+
+  sigVars = ggplot(preds_CarlModel_logFC[significantRows,], aes(x = actual, y = predicted)) +
+             geom_bin2d(bins = 100) +
+              scale_fill_continuous(type = "viridis") +
+              theme_bw()+
+            scale_x_continuous(expand = c(0, 0)) +
+            scale_y_continuous(expand = c(0, 0)) + stat_cor(method = "spearman", label.x = 2, label.sep = "\n") +
+            ggtitle(label = "Predicted vs Actual \nVariant effects \n (causal variants only)")
+  
+  print(allVars)
+  
+  print(sigVars)
+  
+  allVars_logFC = ggscatter(preds_CarlModel_logFC,
+                            x = "actual",
+                            y = "predicted",
+                            shape = 1,
+                            add = "reg.line",
+                            color = "causalVariant",
+                            conf.int = TRUE,
+                            add.params = list(color = "deeppink",
+                                       fill = "gray"),
+                            title = "Predicted vs Actual \nVariant effects (all variants)",
+                            xlab = "Actual",
+                            ylab = "Predicted",
+                            alpha = 0.75) + stat_cor(method = "spearman") + 
+    geom_hline(yintercept=0, linetype="dashed", color = "black") +
+    geom_vline(xintercept=0, linetype="dashed", color = "black") +
+    scale_color_manual(values = c( "#56B4E9", "darkblue"))
+  
+  causalVars_logFC = ggscatter(preds_CarlModel_logFC[significantRows,],
+                                x = "actual",
+                                y = "predicted",
+                                shape = 1,
+                                add = "reg.line",
+                                conf.int = TRUE,
+                                add.params = list(color = "deeppink",
+                                           fill = "lightblue"),
+                                title = "Predicted vs Actual \nVariant effects (causal variants)",
+                                xlab = "Actual",
+                                ylab = "Predicted",
+                                alpha = 0.5) + stat_cor(method = "spearman") + 
+    geom_hline(yintercept=0, linetype="dashed", color = "red") +
+    geom_vline(xintercept=0, linetype="dashed", color = "red")
+  
+  print(allVars_logFC)
+  print(causalVars_logFC)
+  
+  dev.off()
+  
+   pdf(paste0(dir, "results/predictedVsActual_CarlModel_AbslogFC_variantCentered110bp_popFrequencyReduced.pdf"))
+  
+  allVars = ggplot(preds_CarlModel_AbslogFC, aes(x = actual, y = predicted)) +
+           geom_bin2d(bins = 100) +
+            scale_fill_continuous(type = "viridis") +
+            theme_bw()+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0)) + stat_cor(method = "spearman", label.x = 2, label.sep = "\n") +
+          ggtitle(label = "Predicted vs Actual \nAbsolute variant effects \n (all variants)")
+
+  sigVars = ggplot(preds_CarlModel_AbslogFC[significantRows,], aes(x = actual, y = predicted)) +
+             geom_bin2d(bins = 100) +
+              scale_fill_continuous(type = "viridis") +
+              theme_bw()+
+            scale_x_continuous(expand = c(0, 0)) +
+            scale_y_continuous(expand = c(0, 0)) + stat_cor(method = "spearman", label.x = 2, label.sep = "\n") +
+            ggtitle(label = "Predicted vs Actual \nAbsolute variant effects \n (causal variants only)")
+  
+  print(allVars)
+  
+  print(sigVars)
+  
+  allVars_AbslogFC = ggscatter(preds_CarlModel_AbslogFC,
+                            x = "actual",
+                            y = "predicted",
+                            shape = 1,
+                            add = "reg.line",
+                            conf.int = TRUE,
+                            add.params = list(color = "deeppink",fill = "lightblue"),
+                            title = "Predicted vs Actual \nAbsolute variant effects (all variants)",
+                            xlab = "Actual",
+                            ylab = "Predicted",
+                            alpha = 0.5) + stat_cor(method = "spearman") + 
+    geom_hline(yintercept=0, linetype="dashed", color = "red") +
+    geom_vline(xintercept=0, linetype="dashed", color = "red")
+  
+  causalVars_AbslogFC = ggscatter(preds_CarlModel_AbslogFC[significantRows,],
+                                x = "actual",
+                                y = "predicted",
+                                shape = 1,
+                                add = "reg.line",
+                                conf.int = TRUE,
+                                add.params = list(color = "deeppink",
+                                           fill = "lightblue"),
+                                title = "Predicted vs Actual \nAbsolute variant effects (causal variants)",
+                                xlab = "Actual",
+                                ylab = "Predicted",
+                                alpha = 0.5) + stat_cor(method = "spearman") + 
+    geom_hline(yintercept=0, linetype="dashed", color = "red") +
+    geom_vline(xintercept=0, linetype="dashed", color = "red")
+  
+  print(allVars_AbslogFC)
+  print(causalVars_AbslogFC)
+  dev.off()
+  
+  #5UTR library
+  TSSRows = which(allData_popFreqReduced$library == "TSS")
+  cor_TSSAll = cor.test(preds_CarlModel_logFC$predicted[TSSRows], preds_CarlModel_logFC$actual[TSSRows], method = "spearman")
+  
+  cor_TSSAll_Abs = cor.test(preds_CarlModel_AbslogFC$predicted[TSSRows], preds_CarlModel_AbslogFC$actual[TSSRows], method = "spearman")
+  
+ 
+  
+  #Upstream library
+  UpstreamRows = which(allData_popFreqReduced$library == "UpStream")
+  cor_UpStreamAll = cor.test(preds_CarlModel_logFC$predicted[UpstreamRows], preds_CarlModel_logFC$actual[UpstreamRows], method = "spearman")
+  
+  cor_UpStreamAll_Abs = cor.test(preds_CarlModel_AbslogFC$predicted[UpstreamRows], preds_CarlModel_AbslogFC$actual[UpstreamRows], method = "spearman")
+  
+  #5UTR and significant
+  TSSRows = which(allData_popFreqReduced$library == "TSS" & 
+                    as.character(allData_popFreqReduced$causalVariant) == TRUE)
+  cor_TSSSignificant = cor.test(preds_CarlModel_logFC$predicted[TSSRows], preds_CarlModel_logFC$actual[TSSRows], method = "spearman")
+  
+  cor_TSSSignificant_Abs = cor.test(preds_CarlModel_AbslogFC$predicted[TSSRows], preds_CarlModel_AbslogFC$actual[TSSRows], method = "spearman")
+  
+  #Upstream and significant
+  UpstreamRows = which(allData_popFreqReduced$library == "UpStream" &
+                         as.character(allData_popFreqReduced$causalVariant) == TRUE)
+  cor_UpstreamSignificant = cor.test(preds_CarlModel_logFC$predicted[UpstreamRows], preds_CarlModel_logFC$actual[UpstreamRows], method = "spearman")
+  
+  cor_UpstreamSignificant_Abs = cor.test(preds_CarlModel_AbslogFC$predicted[UpstreamRows], preds_CarlModel_AbslogFC$actual[UpstreamRows], method = "spearman")
+  
+  cat("cutting scheme: ", cutScheme, "\n",
+      "AllData_Both", "\t", cor_allData$estimate, "\t", cor_allData$p.value, "\n",
+      "AllData_TSS", "\t", cor_TSSAll$estimate,"\t", cor_TSSAll$p.value, "\n",
+      "AllData_UpStream", "\t", cor_UpStreamAll$estimate,"\t", cor_UpStreamAll$p.value, "\n",
+      "SignificantData_Both", "\t", cor_significantData$estimate, "\t",cor_significantData$p.value, "\n",
+      "SignificantData_TSS", "\t", cor_TSSSignificant$estimate, "\t", cor_TSSSignificant$p.value, "\n",
+      "SignificantData_UpStream", "\t", cor_UpstreamSignificant$estimate, "\t",
+      cor_UpstreamSignificant$p.value, "\n",
+      "AllData_Both (Abs LogFC)", "\t", cor_allData_Abs$estimate, "\t", cor_allData_Abs$p.value, "\n",
+      "AllData_TSS (Abs LogFC)", "\t", cor_TSSAll_Abs$estimate,"\t", cor_TSSAll_Abs$p.value, "\n",
+      "AllData_UpStream (Abs LogFC)", "\t", cor_UpStreamAll_Abs$estimate,"\t", cor_UpStreamAll_Abs$p.value, "\n",
+      "SignificantData_Both (Abs LogFC)", "\t", cor_significantData_Abs$estimate,
+      "\t",cor_significantData_Abs$p.value, "\n",
+      "SignificantData_TSS (Abs LogFC)", "\t", cor_TSSSignificant_Abs$estimate, "\t",
+      cor_TSSSignificant_Abs$p.value, "\n",
+      "SignificantData_UpStream (Abs LogFC)", "\t", cor_UpstreamSignificant_Abs$estimate, "\t",
+      cor_UpstreamSignificant_Abs$p.value, "\n")
+}
+
+preds_CarlModel = preds_variantCentered110bp
+preds_CarlModel$variantNumber = floor(preds_CarlModel$actual)
+preds_CarlModel$allele = 10*(preds_CarlModel$actual - preds_CarlModel$variantNumber)
+colnames(preds_CarlModel) = c("ID", "predicted", "variantNumber", "allele")
+preds_CarlModel$actual = 0
+preds_CarlModel$causalVariant = FALSE
+
+for(i in 1:nrow(allData_popFreqReduced)){
+  aveExpr = allData_popFreqReduced$AveExpr[i]
+  logFC = allData_popFreqReduced$logFC[i]
+  causalVariant = as.character(allData_popFreqReduced$causalVariant[i])
+  
+  aveExpr_alt = aveExpr + logFC
+  ref_ID = i + 0.1
+  alt_ID = i + 0.2
+  preds_CarlModel$actual[which(preds_CarlModel$ID == ref_ID)] = aveExpr
+  preds_CarlModel$actual[which(preds_CarlModel$ID == alt_ID)] = aveExpr_alt
+  
+  preds_CarlModel$causalVariant[which(preds_CarlModel$variantNumber== i)] = causalVariant
+}
+
+corActualPredicted = cor.test(preds_CarlModel$actual, preds_CarlModel$predicted, method = "spearman")
+legendEstimate = paste("rho",round(corActualPredicted$estimate,2), sep = " - ")
+legendPValue = paste("pValue",corActualPredicted$p.value, sep = " - ")
+
+significantRows = which(preds_CarlModel$causalVariant == TRUE)
+
+pdf(paste0(dir,"results/predictedVsActual_CarlModel_AveExpr_variantCentered110bp_popFrequencyReduced.pdf"))
+
+allVars = ggplot(preds_CarlModel, aes(x = actual, y = predicted)) +
+           geom_bin2d(bins = 100) +
+            scale_fill_continuous(type = "viridis") +
+            theme_bw()+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0)) + stat_cor(method = "spearman", label.x = 3, label.sep = "\n") +
+          ggtitle(label = "Predicted vs Actual \nAverage Expression of Barcodes \n (all variants)")
+
+sigVars = ggplot(preds_CarlModel[significantRows,], aes(x = actual, y = predicted)) +
+           geom_bin2d(bins = 100) +
+            scale_fill_continuous(type = "viridis") +
+            theme_bw()+
+          scale_x_continuous(expand = c(0, 0)) +
+          scale_y_continuous(expand = c(0, 0)) + stat_cor(method = "spearman", label.x = 2, label.sep = "\n") +
+          ggtitle(label = "Predicted vs Actual \nAverage Expression of Barcodes \n (causal variants only)")
+
+print(allVars)
+
+print(sigVars)
+
+#par(mfrow = c(2,1))
+#plot(x = preds_CarlModel$actual, y = preds_CarlModel$predicted, main = "Predicted vs Actual \nAverage Expression of Barcodes \n (all variants)", xlab = "Actual", ylab = "Predicted", alpha = 0.5, color = "lightgray")
+#abline(h = 0, v = 0, col = "red") 
+#text(4,15, paste(legendEstimate, legendPValue, sep = "\n"))
+#dev.off()
+
+#pdf(paste0(dir, "resultsOfPromoterAnalyses/DataReworked_BindingSiteScoresFixed_200611/predictedVsActual_CarlModel_AveExpr_significantVars_variantCentered110bp.pdf"))
+#plot(x = preds_CarlModel$actual[significantRows], y = preds_CarlModel$predicted[significantRows], main = "Predicted vs Actual \n Average Expression of Barcodes \n (causal variants only)", xlab = "Actual", ylab = "Predicted")
+#abline(h=0, v=0, col = "red")
+#text(4,14, paste(legendEstimate_significantRows, legendPValue_significantRows, sep = "\n"))
+dev.off()
+
+
+
+#Predict logFC -----------------------
+sink(paste0(dir, "results/predictionResultsCarlModel_logFC_variantCentered110bp_popFrequencyReduced.txt"))
+cat("logFC model results \n")
+
+#variantCentered -110bp
+predOutput(preds_variantCentered110bp, "variantCentered_110bp")
+
+closeAllConnections()
+
+
+```
