@@ -2,6 +2,7 @@
 ### Code, objects and annotations for Renganaath, Cheung, et al., 2020
 
 The code is divided into the six major areas listed below.
+Area 7 is additional code generated during revision for eLife (https://elifesciences.org/articles/62669)
 
 Code in areas 1 to 3 and some of area 4 written by Frank Albert.
 Code in area 5 and the rest of area 4 written by Kaushik Renganaath.
@@ -47,7 +48,10 @@ Make and gather various features. While all code needed to recapitulate how thes
 ### 5. feature analyses & prediction
 Single features and the various multiple regression models
 
-### 6. Application of the deBoer 2020 model to our data
+### 6. Application of the de Boer 2020 model to our data
 The model is described here: https://www.nature.com/articles/s41587-019-0315-8
 
 For this area, all required code and data are in a zipped folder structure. The code is almost entirely from de Boer et al., 2020. We made minor modifications.
+
+
+### 7. Code for analyses during revision for eLife
